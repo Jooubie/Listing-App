@@ -105,14 +105,14 @@ export default function App() {
   // Photo captured → compress → auto-queue → straight back to scanning.
   // No review/confirm: the AI classifies the item in the background during the
   // queue sync (queue.ts runs Gemini when the row has no category yet).
-  const handleCaptureComplete = async (rawBlob: Blob) => {
+  const handleCaptureComplete = async (rawBlob: Blob | null) => {
     try {
-      const compressed = await resizeImage(rawBlob, 1600, 0.8);
+      const imageBlob = rawBlob ? await resizeImage(rawBlob, 1600, 0.8) : null;
 
       await enqueueCapture({
         platform,
         barcode: activeBarcode,
-        imageBlob: compressed,
+        imageBlob,
         photographer_id: photographerId,
       });
 

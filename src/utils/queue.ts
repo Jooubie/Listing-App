@@ -8,7 +8,7 @@ export interface QueuedItem {
   id: string;
   platform: string;
   barcode: string;
-  imageBlob: Blob;
+  imageBlob?: Blob | null;
   photographer_id: string;
   created_at: string;
 }
@@ -36,7 +36,7 @@ function getDB(): Promise<IDBPDatabase<QueueDB>> {
 export async function enqueueCapture(item: {
   platform: string;
   barcode: string;
-  imageBlob: Blob;
+  imageBlob?: Blob | null;
   photographer_id: string;
 }): Promise<QueuedItem> {
   const db = await getDB();
