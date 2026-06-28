@@ -3,7 +3,6 @@ import { resizeImage } from './utils/image';
 import { isMockMode } from './utils/sheets';
 import { enqueueCapture, getQueueSize, syncOfflineQueue } from './utils/queue';
 import { Loader2, Wifi } from 'lucide-react';
-import type { ReviewData } from './components/AIReview';
 
 const SessionSetup = lazy(() =>
   import('./components/SessionSetup').then((m) => ({ default: m.SessionSetup }))
@@ -14,11 +13,11 @@ const BarcodeScanner = lazy(() =>
 const PhotoCapture = lazy(() =>
   import('./components/PhotoCapture').then((m) => ({ default: m.PhotoCapture }))
 );
-const AIReview = lazy(() =>
-  import('./components/AIReview').then((m) => ({ default: m.AIReview }))
-);
 
-type Screen = 'setup' | 'scan' | 'capture' | 'review';
+// NOTE: there is intentionally NO review/confirm screen. The photographer just
+// scans → captures → the item auto-queues, and AI classifies it in the
+// background during sync (see queue.ts). The owner revises in the Google Sheet.
+type Screen = 'setup' | 'scan' | 'capture';
 
 export default function App() {
   const [photographerId, setPhotographerId] = useState<string>(() =>
@@ -42,25 +41,11 @@ export default function App() {
     localStorage.getItem('joubie_active_barcode') || ''
   );
   const [queueSize, setQueueSize] = useState(0);
-  const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [syncProgress, setSyncProgress] = useState<{
     syncedCount: number;
     totalCount: number;
     currentItem?: any;
   } | null>(null);
-
-  // Quick Capture mode — skip AI Review, auto-queue with background AI
-  const [quickMode, setQuickMode] = useState<boolean>(() =>
-    localStorage.getItem('joubie_quick_mode') === 'true'
-  );
-
-  const toggleQuickMode = useCallback(() => {
-    setQuickMode(prev => {
-      const next = !prev;
-      localStorage.setItem('joubie_quick_mode', next.toString());
-      return next;
-    });
-  }, []);
 
   useEffect(() => {
     if (activeScreen === 'setup') {
@@ -122,87 +107,36 @@ export default function App() {
     setActiveScreen('capture');
   }, []);
 
-  // Photo captured → compress → Quick Mode skips review, Standard Mode goes to AI Review
+  // Photo captured → compress → auto-queue → straight back to scanning.
+  // No review/confirm: the AI classifies the item in the background during the
+  // queue sync (queue.ts runs Gemini when the row has no category yet).
   const handleCaptureComplete = async (rawBlob: Blob) => {
     try {
       const compressed = await resizeImage(rawBlob, 1600, 0.8);
 
-      if (quickMode) {
-        // QUICK MODE: enqueue immediately, skip AI Review screen.
-        // AI classification runs in background during sync (queue.ts).
-        await enqueueCapture({
-          platform,
-          barcode: activeBarcode,
-          imageBlob: compressed,
-          photographer_id: photographerId,
-          factory_location: factoryLocation,
-        });
-
-        const size = await getQueueSize();
-        setQueueSize(size);
-
-        const nextCount = sessionCount + 1;
-        setSessionCount(nextCount);
-        localStorage.setItem('joubie_session_count', nextCount.toString());
-
-        // Reset and return to scan immediately
-        setActiveBarcode('');
-        setActiveScreen('scan');
-        triggerSync();
-      } else {
-        // STANDARD MODE: go to AI Review screen
-        setCapturedBlob(compressed);
-        setActiveScreen('review');
-      }
-    } catch (err) {
-      console.error('[App] Capture processing failed:', err);
-      alert('Failed to process photo. Please try again.');
-      setActiveScreen('scan');
-    }
-  };
-
-  // Review confirmed → save with AI details to queue → update counts → back to scan
-  const handleReviewConfirm = async (data: ReviewData) => {
-    try {
-      // 1. Queue the item immediately (even when online) with the reviewed fields
       await enqueueCapture({
         platform,
         barcode: activeBarcode,
-        imageBlob: data.imageBlob,
+        imageBlob: compressed,
         photographer_id: photographerId,
         factory_location: factoryLocation,
-        section: data.section,
-        category: data.category,
-        subCategory: data.subCategory,
-        productType: data.productType,
-        productName: data.productName,
-        brand: data.brand,
-        size: data.size,
-        color: data.color,
-        descriptionAr: data.descriptionAr,
-        descriptionEn: data.descriptionEn,
-        notes: data.notes,
-        confidence: data.confidence
       });
 
-      // 2. Update queue size and increment session tally
       const size = await getQueueSize();
       setQueueSize(size);
-      
+
       const nextCount = sessionCount + 1;
       setSessionCount(nextCount);
       localStorage.setItem('joubie_session_count', nextCount.toString());
 
-      // 3. Return to scan screen
-      setCapturedBlob(null);
+      // Reset and return to scanning immediately — keep the loop fast
       setActiveBarcode('');
       setActiveScreen('scan');
-
-      // 4. Trigger background sync in parallel (non-blocking)
       triggerSync();
     } catch (err) {
-      console.error('[App] Save confirmed details failed:', err);
-      alert('Failed to save details. Please try again.');
+      console.error('[App] Capture processing failed:', err);
+      alert('Failed to save capture. Please try again.');
+      setActiveScreen('scan');
     }
   };
 
@@ -246,8 +180,6 @@ export default function App() {
             onChangeSession={handleResetSession}
             offlineCount={queueSize}
             sessionCount={sessionCount}
-            quickMode={quickMode}
-            onToggleQuickMode={toggleQuickMode}
           />
         </Suspense>
       )}
@@ -268,29 +200,6 @@ export default function App() {
           />
         </Suspense>
       )}
-
-      {activeScreen === 'review' && capturedBlob && (
-        <Suspense fallback={
-          <div className="flex-1 flex flex-col items-center justify-center bg-slate-950 text-slate-400">
-            <Loader2 className="w-8 h-8 text-indigo-500 animate-spin mb-2" />
-            <p className="text-xs font-semibold uppercase tracking-wider">Loading AI Review...</p>
-          </div>
-        }>
-          <AIReview
-            platform={platform}
-            barcode={activeBarcode}
-            photographerId={photographerId}
-            imageBlob={capturedBlob}
-            onConfirm={handleReviewConfirm}
-            onRetake={() => {
-              setCapturedBlob(null);
-              setActiveScreen('capture');
-            }}
-          />
-        </Suspense>
-      )}
-
-
 
       {/* Background Sync Overlay */}
       {syncProgress && (

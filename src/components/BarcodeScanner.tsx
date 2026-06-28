@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { DecodeHintType, BarcodeFormat } from '@zxing/library';
-import { Barcode, AlertCircle, RefreshCw, Keyboard, Wifi, WifiOff, Zap, ZapOff, Package } from 'lucide-react';
+import { Barcode, AlertCircle, RefreshCw, Keyboard, Wifi, WifiOff, Package } from 'lucide-react';
 
 interface BarcodeScannerProps {
   platform: string;
@@ -10,8 +10,6 @@ interface BarcodeScannerProps {
   onChangeSession: () => void;
   offlineCount: number;
   sessionCount: number;
-  quickMode: boolean;
-  onToggleQuickMode: () => void;
 }
 
 export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
@@ -20,9 +18,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   onDecode,
   onChangeSession,
   offlineCount,
-  sessionCount,
-  quickMode,
-  onToggleQuickMode
+  sessionCount
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<any>(null);
@@ -345,19 +341,6 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             </select>
           </div>
         )}
-
-        {/* Quick Mode Toggle — high-speed capture (skips AI Review) */}
-        <button
-          onClick={onToggleQuickMode}
-          className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm shadow-md border ${
-            quickMode
-              ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500/50 shadow-emerald-500/20'
-              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/50'
-          }`}
-        >
-          {quickMode ? <Zap className="w-5 h-5" /> : <ZapOff className="w-5 h-5" />}
-          {quickMode ? 'Quick Capture ON' : 'Quick Capture OFF'}
-        </button>
 
         <button
           onClick={() => setIsManualOpen(true)}
