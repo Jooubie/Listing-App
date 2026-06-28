@@ -27,4 +27,5 @@ dist-ssr
 .env.*
 !.env.example
 
+# Vercel local build artifacts
 .vercel
