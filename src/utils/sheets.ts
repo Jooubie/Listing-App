@@ -25,7 +25,7 @@ export interface CaptureRow {
   confidence: number;
   notes: string;
   imageBlob?: Blob;
-  status?: 'confirmed' | 'needs_review';
+  status?: 'pending' | 'confirmed' | 'needs_review';
 }
 
 export interface SheetWriteResponse {
@@ -66,7 +66,7 @@ export async function writeRowToSheet(row: CaptureRow): Promise<SheetWriteRespon
     descriptionEn: row.descriptionEn,
     confidence: row.confidence,
     notes: row.notes,
-    status: row.status ?? 'confirmed',
+    status: row.status ?? 'pending',
     imageBase64
   };
 

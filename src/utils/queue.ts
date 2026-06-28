@@ -1,9 +1,9 @@
 import { openDB } from 'idb';
 import type { DBSchema, IDBPDatabase } from 'idb';
 import { writeRowToSheet } from './sheets';
-import { analyzeProductImage } from './gemini';
-import { TAXONOMY } from '../data/taxonomy';
 
+// The phone only captures raw data. AI classification happens server-side in the
+// Google Apps Script (a timed trigger fills section/category/product/etc.).
 export interface QueuedItem {
   id: string;
   platform: string;
@@ -12,18 +12,6 @@ export interface QueuedItem {
   photographer_id: string;
   factory_location: string;
   created_at: string;
-  section?: string;
-  category?: string;
-  subCategory?: string;
-  productType?: string;
-  productName?: string;
-  brand?: string;
-  size?: string;
-  color?: string;
-  descriptionAr?: string;
-  descriptionEn?: string;
-  notes?: string;
-  confidence?: number;
 }
 
 interface QueueDB extends DBSchema {
@@ -52,18 +40,6 @@ export async function enqueueCapture(item: {
   imageBlob: Blob;
   photographer_id: string;
   factory_location: string;
-  section?: string;
-  category?: string;
-  subCategory?: string;
-  productType?: string;
-  productName?: string;
-  brand?: string;
-  size?: string;
-  color?: string;
-  descriptionAr?: string;
-  descriptionEn?: string;
-  notes?: string;
-  confidence?: number;
 }): Promise<QueuedItem> {
   const db = await getDB();
   const queuedItem: QueuedItem = {
@@ -96,8 +72,9 @@ export async function getQueueSize(): Promise<number> {
 
 let isSyncing = false;
 
-// Offline items sync directly to the sheet as "needs_review" since we can't
-// show the AI review UI during background sync. Amr will see them flagged in the sheet.
+// Uploads each queued capture to the sheet as a 'pending' row (photo + barcode +
+// who/where). The Apps Script trigger then classifies it with Gemini and flips
+// the status to confirmed / needs_review. No AI runs on the phone.
 export async function syncOfflineQueue(
   onProgress?: (progress: { syncedCount: number; totalCount: number; currentItem?: QueuedItem }) => void
 ): Promise<void> {
@@ -112,70 +89,33 @@ export async function syncOfflineQueue(
     const totalCount = queue.length;
     if (totalCount === 0) return;
 
-    console.log(`[Sync] Syncing ${totalCount} captures...`);
+    console.log(`[Sync] Uploading ${totalCount} captures...`);
     let syncedCount = 0;
 
     for (const item of queue) {
       onProgress?.({ syncedCount, totalCount, currentItem: item });
 
       try {
-        let section = item.section || '';
-        let category = item.category || '';
-        let subCategory = item.subCategory || '';
-        let product = item.productType || item.productName || '';
-        let size = item.size || '';
-        let color = item.color || '';
-        let descriptionAr = item.descriptionAr || '';
-        let descriptionEn = item.descriptionEn || '';
-        let brand = item.brand || '';
-        let confidence = item.confidence || 0;
-        let notes = item.notes || '';
-
-        // If the item doesn't have reviewed details (e.g. Quick Capture mode),
-        // run Gemini analysis now during background sync.
-        if (!category) {
-          try {
-            const suggestion = await analyzeProductImage(item.imageBlob);
-            category = suggestion.category;
-            subCategory = suggestion.sub_category;
-            product = suggestion.product;
-            brand = suggestion.brand;
-            notes = suggestion.notes;
-            confidence = suggestion.confidence;
-            descriptionAr = suggestion.description_ar;
-            descriptionEn = suggestion.description_en;
-            color = suggestion.color;
-            size = suggestion.size;
-          } catch (geminiErr: any) {
-            console.warn(`[Sync] Gemini classification failed for item ${item.id}. Saving empty.`, geminiErr);
-            notes = `Gemini Vision failed during sync: ${geminiErr.message || 'Unknown error'}`;
-          }
-        }
-
-        // Fill section from taxonomy if not already set
-        if (!section) {
-          section = TAXONOMY.find(t => t.category === category)?.section || 'Other';
-        }
-
         await writeRowToSheet({
           platform: item.platform,
           barcode: item.barcode,
           photographerId: item.photographer_id,
           factoryLocation: item.factory_location || '',
-          section,
-          category,
-          subCategory,
-          product: product || `Product ${item.barcode}`,
-          size,
+          // AI fields intentionally empty — filled server-side by the Apps Script
+          section: '',
+          category: '',
+          subCategory: '',
+          product: '',
+          size: '',
           price: '',
-          color,
-          brand: brand || 'Unknown',
-          descriptionAr,
-          descriptionEn,
-          notes,
-          confidence,
+          color: '',
+          brand: '',
+          descriptionAr: '',
+          descriptionEn: '',
+          notes: '',
+          confidence: 0,
           imageBlob: item.imageBlob,
-          status: category ? 'confirmed' : 'needs_review'
+          status: 'pending',
         });
 
         await dequeueCapture(item.id);

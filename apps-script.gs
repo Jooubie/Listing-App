@@ -64,9 +64,16 @@ const HEADERS = [
 
 // 1-based column indexes
 const COL = {
-  DATE: 2, BARCODE: 6, DUP: 7, CONFIDENCE: 18, STATUS: 20,
-  ORIG_PREVIEW: 21, ORIG_URL: 22, EDITED1: 23, EDITED2: 24, LISTING: 25
+  DATE: 2, BARCODE: 6, DUP: 7,
+  SECTION: 8, CATEGORY: 9, SUBCAT: 10, PRODUCT: 11, SIZE: 12, PRICE: 13,
+  COLOR: 14, BRAND: 15, DESC_AR: 16, DESC_EN: 17, CONFIDENCE: 18, NOTES: 19,
+  STATUS: 20, ORIG_PREVIEW: 21, ORIG_URL: 22, EDITED1: 23, EDITED2: 24, LISTING: 25
 };
+
+// ── AI classification config ───────────────────────────────
+const GEMINI_MODEL                = 'gemini-1.5-flash';
+const CLASSIFY_BATCH_LIMIT        = 25;   // rows per trigger run (respect 6-min limit + API quota)
+const CONFIDENCE_REVIEW_THRESHOLD = 0.6;  // below this → needs_review
 
 // Platform brand colors for subtle row tinting (metadata columns only)
 const PLATFORM_COLORS = {
@@ -140,7 +147,7 @@ function doPost(e) {
       data.descriptionEn   || '',   // Q  Description (EN)
       data.confidence != null ? data.confidence : '', // R  AI Confidence
       data.notes           || '',   // S  Notes
-      data.status          || 'confirmed', // T  Status
+      data.status          || 'pending', // T  Status (AI fills, then flips to confirmed/needs_review)
       '',                           // U  Original Image (formula below)
       imageUrl,                     // V  Original Image URL
       '',                           // W  Edited Image 1 (team fills)
@@ -202,9 +209,15 @@ function setup() {
 
   addDropdowns_(sheet);
   buildDashboard_(ss);
+  ensureTrigger_(); // schedule server-side AI classification every 5 min
 
   const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
   Logger.log('Captures ready (rows=' + sheet.getLastRow() + '). Drive: ' + folder.getName());
+
+  const hasKey = !!PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  Logger.log(hasKey
+    ? '✅ Gemini key found. AI classification is armed.'
+    : '⚠️ No Gemini key yet — run setApiKey("YOUR_GEMINI_KEY") once so AI can classify.');
   Logger.log('✅ Setup complete. Deploy → Manage deployments → New version to go live.');
 }
 
@@ -287,4 +300,159 @@ function buildDashboard_(ss) {
 
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  AI CLASSIFICATION — runs server-side on a timed trigger.
+//  The phone only uploads raw captures (status = pending); this fills the
+//  AI columns and flips the status. The Gemini key lives in Script Properties,
+//  never in the app bundle.
+// ═══════════════════════════════════════════════════════════
+
+// Closed taxonomy (kept in sync with src/data/taxonomy.ts)
+const TAXONOMY_TEXT = [
+  "Section: Apparel | Category: Men's Clothing | Sub-Category: Sweatshirts | Product: Sweatshirt",
+  "Section: Apparel | Category: Men's Clothing | Sub-Category: T-Shirts | Product: T-Shirt",
+  "Section: Apparel | Category: Men's Clothing | Sub-Category: Hoodies | Product: Hoodie",
+  "Section: Apparel | Category: Men's Clothing | Sub-Category: Pants | Product: Pants",
+  "Section: Apparel | Category: Men's Clothing | Sub-Category: Jackets | Product: Jacket",
+  "Section: Apparel | Category: Women's Clothing | Sub-Category: Sweatshirts | Product: Sweatshirt",
+  "Section: Apparel | Category: Women's Clothing | Sub-Category: T-Shirts | Product: T-Shirt",
+  "Section: Apparel | Category: Women's Clothing | Sub-Category: Hoodies | Product: Hoodie",
+  "Section: Apparel | Category: Women's Clothing | Sub-Category: Dresses | Product: Dress",
+  "Section: Apparel | Category: Women's Clothing | Sub-Category: Skirts | Product: Skirt",
+  "Section: Apparel | Category: Women's Clothing | Sub-Category: Pants | Product: Pants",
+  "Section: Apparel | Category: Women's Clothing | Sub-Category: Jackets | Product: Jacket",
+  "Section: Apparel | Category: Kids' Clothing | Sub-Category: Sweatshirts | Product: Sweatshirt",
+  "Section: Apparel | Category: Kids' Clothing | Sub-Category: T-Shirts | Product: T-Shirt",
+  "Section: Apparel | Category: Kids' Clothing | Sub-Category: Pajamas | Product: Pajamas",
+  "Section: Footwear | Category: Footwear | Sub-Category: Sneakers | Product: Sneakers",
+  "Section: Footwear | Category: Footwear | Sub-Category: Sandals | Product: Sandals",
+  "Section: Footwear | Category: Footwear | Sub-Category: Flip Flops | Product: Flip Flops",
+  "Section: Footwear | Category: Footwear | Sub-Category: Boots | Product: Boots",
+  "Section: Footwear | Category: Footwear | Sub-Category: Slippers | Product: Slippers",
+  "Section: Footwear | Category: Footwear | Sub-Category: Formal Shoes | Product: Formal Shoes",
+  "Section: Sports & Fitness | Category: Fitness Equipment | Sub-Category: Power Loops | Product: Power Loops",
+  "Section: Sports & Fitness | Category: Fitness Equipment | Sub-Category: Resistance Bands | Product: Resistance Bands",
+  "Section: Sports & Fitness | Category: Fitness Equipment | Sub-Category: Knee Support & Braces | Product: Knee Support",
+  "Section: Sports & Fitness | Category: Fitness Equipment | Sub-Category: Dumbbells | Product: Dumbbells",
+  "Section: Sports & Fitness | Category: Sports Accessories | Sub-Category: Swimming Goggles | Product: Swimming Goggles",
+  "Section: Bags & Accessories | Category: Bags | Sub-Category: Handbags | Product: Handbag",
+  "Section: Bags & Accessories | Category: Bags | Sub-Category: Backpacks | Product: Backpack",
+  "Section: Bags & Accessories | Category: Accessories | Sub-Category: Wallets | Product: Wallet",
+  "Section: Bags & Accessories | Category: Accessories | Sub-Category: Belts | Product: Belt",
+  "Section: Bags & Accessories | Category: Accessories | Sub-Category: Sunglasses | Product: Sunglasses",
+  "Section: Bags & Accessories | Category: Accessories | Sub-Category: Watches | Product: Watch",
+  "Section: Bags & Accessories | Category: Jewelry | Sub-Category: Bracelets | Product: Bracelet",
+  "Section: Bags & Accessories | Category: Jewelry | Sub-Category: Earrings | Product: Earrings",
+  "Section: Toys | Category: Toys | Sub-Category: Action Figures | Product: Action Figure",
+  "Section: Toys | Category: Toys | Sub-Category: Dolls | Product: Doll",
+  "Section: Toys | Category: Toys | Sub-Category: Building Blocks | Product: Building Blocks",
+  "Section: Toys | Category: Toys | Sub-Category: Puzzles | Product: Puzzle",
+  "Section: Other | Category: Other | Sub-Category: Miscellaneous | Product: Other / Unclassified"
+].join('\n');
+
+// Save the Gemini key ONCE: in the editor run setApiKey('YOUR_KEY'), or set the
+// 'GEMINI_API_KEY' property under Project Settings → Script Properties.
+function setApiKey(key) {
+  PropertiesService.getScriptProperties().setProperty('GEMINI_API_KEY', key);
+  Logger.log('GEMINI_API_KEY saved.');
+}
+
+// Trigger target — classifies up to CLASSIFY_BATCH_LIMIT pending rows per run.
+function classifyPending() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) { Logger.log('⚠️ No GEMINI_API_KEY set — run setApiKey("...") once.'); return; }
+
+  const ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(CAPTURES_TAB);
+  if (!sheet || sheet.getLastRow() < 2) return;
+
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
+  let processed = 0;
+
+  for (let i = 0; i < values.length; i++) {
+    if (processed >= CLASSIFY_BATCH_LIMIT) break;
+    const row      = i + 2;
+    const status   = values[i][COL.STATUS - 1];
+    const imageUrl = values[i][COL.ORIG_URL - 1];
+    if (status !== 'pending' || !imageUrl) continue;
+
+    try {
+      const s = classifyImage_(imageUrl, apiKey);
+
+      // Section..Size (cols 8–12)
+      sheet.getRange(row, COL.SECTION, 1, 5).setValues([[
+        s.section || '', s.category || '', s.sub_category || '', s.product || '', s.size || ''
+      ]]);
+      // Color..Notes (cols 14–19) — Price (13) is left for the owner
+      sheet.getRange(row, COL.COLOR, 1, 6).setValues([[
+        s.color || '', s.brand || '', s.description_ar || '', s.description_en || '',
+        (s.confidence != null ? s.confidence : ''), s.notes || ''
+      ]]);
+
+      const newStatus = (Number(s.confidence) >= CONFIDENCE_REVIEW_THRESHOLD) ? 'confirmed' : 'needs_review';
+      const statusCell = sheet.getRange(row, COL.STATUS).setValue(newStatus);
+      if (newStatus === 'needs_review') statusCell.setBackground('#3d2800').setFontColor('#fbbf24');
+      processed++;
+    } catch (err) {
+      sheet.getRange(row, COL.STATUS).setValue('needs_review').setBackground('#3d2800').setFontColor('#fbbf24');
+      sheet.getRange(row, COL.NOTES).setValue('AI failed: ' + err.message);
+      Logger.log('Row ' + row + ' classify failed: ' + err.message);
+    }
+  }
+  Logger.log('classifyPending processed ' + processed + ' row(s).');
+}
+
+function classifyImage_(imageUrl, apiKey) {
+  const idMatch = String(imageUrl).match(/[-\w]{25,}/);
+  if (!idMatch) throw new Error('Could not parse Drive file id from image URL');
+  const blob   = DriveApp.getFileById(idMatch[0]).getBlob();
+  const base64 = Utilities.base64Encode(blob.getBytes());
+
+  const prompt =
+    'You are a professional product cataloging assistant for an e-commerce platform.\n' +
+    'Analyze the product image and classify it strictly using the taxonomy below, ' +
+    'and write marketing-grade product descriptions in Arabic and English.\n\n' +
+    'Taxonomy (pick exact matches for section, category, sub_category, product):\n' + TAXONOMY_TEXT + '\n\n' +
+    'Return ONLY valid JSON:\n' +
+    '{"section":"","category":"","sub_category":"","product":"","size":"","color":"",' +
+    '"description_ar":"","description_en":"","brand":"","confidence":0.0,"notes":""}\n' +
+    'Rules: section/category/sub_category/product MUST be exact taxonomy values. ' +
+    'color uses short codes (Wht, Blk, Wht-Gry, Blu, Red...). size only if visible else blank. ' +
+    'brand if visible else "Unknown". confidence 0.0-1.0. Return ONLY the JSON object.';
+
+  const body = {
+    contents: [{
+      parts: [
+        { inlineData: { mimeType: blob.getContentType() || 'image/jpeg', data: base64 } },
+        { text: prompt }
+      ]
+    }],
+    generationConfig: { temperature: 0.1, topP: 0.8, maxOutputTokens: 512 }
+  };
+
+  const res = UrlFetchApp.fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=' + apiKey,
+    { method: 'post', contentType: 'application/json', payload: JSON.stringify(body), muteHttpExceptions: true }
+  );
+  if (res.getResponseCode() !== 200) {
+    throw new Error('Gemini HTTP ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+  }
+
+  const json  = JSON.parse(res.getContentText());
+  const parts = (((json.candidates || [])[0] || {}).content || {}).parts || [];
+  let text    = parts[0] ? parts[0].text : '';
+  if (!text) throw new Error('Empty Gemini response');
+  text = text.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
+  return JSON.parse(text);
+}
+
+// Creates the 5-minute classification trigger if one doesn't already exist.
+function ensureTrigger_() {
+  const exists = ScriptApp.getProjectTriggers()
+    .some(t => t.getHandlerFunction() === 'classifyPending');
+  if (exists) { Logger.log('classifyPending trigger already exists.'); return; }
+  ScriptApp.newTrigger('classifyPending').timeBased().everyMinutes(5).create();
+  Logger.log('Created classifyPending trigger (every 5 min).');
 }
