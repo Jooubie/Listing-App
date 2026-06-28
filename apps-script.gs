@@ -115,15 +115,19 @@ function doPost(e) {
     const ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = getOrCreateCaptures_(ss);
 
-    // 1. Upload image to Drive (if base64 payload present)
+    // 1. Upload image to Drive (if base64 payload present) — non-fatal
     let imageUrl = data.imageUrl || '';
     if (data.imageBase64) {
-      const bytes    = Utilities.base64Decode(data.imageBase64);
-      const fileName = `${data.platform || 'product'}_${data.barcode || 'nobarcode'}_${Date.now()}.jpg`;
-      const blob     = Utilities.newBlob(bytes, 'image/jpeg', fileName);
-      const file     = DriveApp.getFolderById(DRIVE_FOLDER_ID).createFile(blob);
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      imageUrl = `https://drive.google.com/uc?id=${file.getId()}`;
+      try {
+        const bytes    = Utilities.base64Decode(data.imageBase64);
+        const fileName = `${data.platform || 'product'}_${data.barcode || 'nobarcode'}_${Date.now()}.jpg`;
+        const blob     = Utilities.newBlob(bytes, 'image/jpeg', fileName);
+        const file     = DriveApp.getFolderById(DRIVE_FOLDER_ID).createFile(blob);
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        imageUrl = `https://drive.google.com/uc?id=${file.getId()}`;
+      } catch (imgErr) {
+        console.error('[doPost] Drive image upload failed (row will still be written):', imgErr.message);
+      }
     }
 
     // 2. Duplicate check against existing barcodes

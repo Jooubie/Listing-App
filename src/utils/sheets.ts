@@ -42,9 +42,15 @@ export async function writeRowToSheet(row: CaptureRow): Promise<SheetWriteRespon
     return { success: true, imageUrl: 'https://lh3.googleusercontent.com/d/mock_image_id', rowNumber: 1 };
   }
 
+  // Convert image blob to base64 — kept separate so failures don't block the row write
   let imageBase64: string | undefined;
   if (row.imageBlob) {
-    imageBase64 = await blobToBase64(row.imageBlob);
+    try {
+      imageBase64 = await blobToBase64(row.imageBlob);
+      console.log(`[Sheets] Image base64 ready, size: ~${Math.round(imageBase64.length / 1024)}KB`);
+    } catch (err) {
+      console.warn('[Sheets] Image base64 conversion failed — submitting row without image:', err);
+    }
   }
 
   const payload = {
@@ -68,23 +74,33 @@ export async function writeRowToSheet(row: CaptureRow): Promise<SheetWriteRespon
     imageBase64
   };
 
-  // Apps Script deployed as Web App doesn't support CORS pre-flight on POST with JSON.
-  // We use no-cors and accept opaque response; errors surface only if the fetch itself fails.
-  const response = await fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(payload)
-  });
+  // Apps Script deployed as Web App — use text/plain to avoid CORS preflight.
+  // Follow redirects explicitly (Apps Script sometimes redirects to a new URL).
+  let response: Response;
+  try {
+    response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+    });
+  } catch (fetchErr) {
+    throw new Error(`Network error reaching Apps Script: ${(fetchErr as Error).message}`);
+  }
 
   if (!response.ok) {
-    throw new Error(`Sheet write failed: HTTP ${response.status}`);
+    throw new Error(`Apps Script returned HTTP ${response.status}`);
   }
 
   try {
     const result: SheetWriteResponse = await response.json();
+    if (!result.success) {
+      console.warn('[Sheets] Apps Script reported failure:', result);
+      // Non-fatal: row was still written (Apps Script returns success:false only on image errors)
+    }
     return result;
   } catch {
-    // Apps Script no-cors returns opaque response — treat 2xx as success
+    // Opaque or non-JSON response — treat any 2xx as success
     return { success: true };
   }
 }
@@ -94,9 +110,12 @@ function blobToBase64(blob: Blob): Promise<string> {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      resolve(result.split(',')[1]);
+      // Strip the data:image/...;base64, prefix
+      const base64 = result.split(',')[1];
+      if (!base64) reject(new Error('Empty base64 result'));
+      else resolve(base64);
     };
-    reader.onerror = reject;
+    reader.onerror = () => reject(new Error('FileReader failed'));
     reader.readAsDataURL(blob);
   });
 }

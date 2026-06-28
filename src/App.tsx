@@ -107,7 +107,16 @@ export default function App() {
   // queue sync (queue.ts runs Gemini when the row has no category yet).
   const handleCaptureComplete = async (rawBlob: Blob | null) => {
     try {
-      const imageBlob = rawBlob ? await resizeImage(rawBlob, 1600, 0.8) : null;
+      // Compress image — fall back to original blob if canvas resize fails
+      let imageBlob: Blob | null = null;
+      if (rawBlob) {
+        try {
+          imageBlob = await resizeImage(rawBlob, 1200, 0.75);
+        } catch (resizeErr) {
+          console.warn('[App] Image resize failed, using original blob:', resizeErr);
+          imageBlob = rawBlob;
+        }
+      }
 
       await enqueueCapture({
         platform,
