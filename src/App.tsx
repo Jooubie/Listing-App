@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense, useCallback } from 'react';
 import { resizeImage } from './utils/image';
 import { isMockMode } from './utils/sheets';
 import { enqueueCapture, getQueueSize, syncOfflineQueue } from './utils/queue';
@@ -45,6 +45,19 @@ export default function App() {
     totalCount: number;
     currentItem?: any;
   } | null>(null);
+
+  // Quick Capture mode — skip AI Review, auto-queue with background AI
+  const [quickMode, setQuickMode] = useState<boolean>(() =>
+    localStorage.getItem('joubie_quick_mode') === 'true'
+  );
+
+  const toggleQuickMode = useCallback(() => {
+    setQuickMode(prev => {
+      const next = !prev;
+      localStorage.setItem('joubie_quick_mode', next.toString());
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (activeScreen === 'setup') {
@@ -99,20 +112,42 @@ export default function App() {
     setActiveScreen('scan');
   };
 
-  const handleBarcodeDecoded = (barcode: string) => {
+  const handleBarcodeDecoded = useCallback((barcode: string) => {
     setActiveBarcode(barcode);
     setActiveScreen('capture');
-  };
+  }, []);
 
-  // Photo captured → compress → navigate to review screen
+  // Photo captured → compress → Quick Mode skips review, Standard Mode goes to AI Review
   const handleCaptureComplete = async (rawBlob: Blob) => {
     try {
-      // 1. Optimize image (resizing takes 100-200ms)
       const compressed = await resizeImage(rawBlob, 1600, 0.8);
-      
-      // 2. Save blob and transition to AI review screen
-      setCapturedBlob(compressed);
-      setActiveScreen('review');
+
+      if (quickMode) {
+        // QUICK MODE: enqueue immediately, skip AI Review screen.
+        // AI classification runs in background during sync (queue.ts).
+        await enqueueCapture({
+          platform,
+          barcode: activeBarcode,
+          imageBlob: compressed,
+          photographer_id: photographerId,
+        });
+
+        const size = await getQueueSize();
+        setQueueSize(size);
+
+        const nextCount = sessionCount + 1;
+        setSessionCount(nextCount);
+        localStorage.setItem('joubie_session_count', nextCount.toString());
+
+        // Reset and return to scan immediately
+        setActiveBarcode('');
+        setActiveScreen('scan');
+        triggerSync();
+      } else {
+        // STANDARD MODE: go to AI Review screen
+        setCapturedBlob(compressed);
+        setActiveScreen('review');
+      }
     } catch (err) {
       console.error('[App] Capture processing failed:', err);
       alert('Failed to process photo. Please try again.');
@@ -197,6 +232,9 @@ export default function App() {
             onDecode={handleBarcodeDecoded}
             onChangeSession={handleResetSession}
             offlineCount={queueSize}
+            sessionCount={sessionCount}
+            quickMode={quickMode}
+            onToggleQuickMode={toggleQuickMode}
           />
         </Suspense>
       )}

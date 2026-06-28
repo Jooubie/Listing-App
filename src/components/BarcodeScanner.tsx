@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { DecodeHintType, BarcodeFormat } from '@zxing/library';
-import { Barcode, AlertCircle, RefreshCw, Keyboard, Wifi, WifiOff } from 'lucide-react';
+import { Barcode, AlertCircle, RefreshCw, Keyboard, Wifi, WifiOff, Zap, ZapOff, Package } from 'lucide-react';
 
 interface BarcodeScannerProps {
   platform: string;
@@ -9,6 +9,9 @@ interface BarcodeScannerProps {
   onDecode: (barcode: string) => void;
   onChangeSession: () => void;
   offlineCount: number;
+  sessionCount: number;
+  quickMode: boolean;
+  onToggleQuickMode: () => void;
 }
 
 export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
@@ -16,11 +19,17 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   photographerId,
   onDecode,
   onChangeSession,
-  offlineCount
+  offlineCount,
+  sessionCount,
+  quickMode,
+  onToggleQuickMode
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<any>(null);
   const isStoppedRef = useRef(false);
+  // Ref to latest onDecode — prevents camera restart when parent re-renders
+  const onDecodeRef = useRef(onDecode);
+  onDecodeRef.current = onDecode;
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -138,7 +147,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           triggerSuccessFeedback();
           setDecodedValue(text);
           isStoppedRef.current = true;
-          setTimeout(() => onDecode(text), 800);
+          setTimeout(() => onDecodeRef.current(text), 350);
         }
         // NotFoundException fires every frame while no barcode is in view — ignore it
         if (err && err.name !== 'NotFoundException') {
@@ -176,7 +185,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     return () => {
       stopScanner();
     };
-  }, [selectedCameraId, onDecode, triggerSuccessFeedback, stopScanner]);
+  }, [selectedCameraId, triggerSuccessFeedback, stopScanner]);
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -210,7 +219,16 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           <span className="text-sm font-extrabold text-white">{getPlatformLabel(platform)}</span>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Session Tally — big visible counter for high-volume motivation */}
+        <div className="flex flex-col items-center">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Scanned</span>
+          <span className="text-2xl font-black text-emerald-400 leading-none flex items-center gap-1">
+            <Package className="w-4 h-4" />
+            {sessionCount}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
             {isOnline ? (
               <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-950/40 px-2 py-0.5 border border-emerald-500/20 rounded-full">
@@ -242,7 +260,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
         <video
           ref={videoRef}
-          className="w-full h-full object-contain bg-slate-950"
+          className="w-full h-full object-cover bg-slate-950"
           muted
           playsInline
           autoPlay
@@ -317,6 +335,19 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             </select>
           </div>
         )}
+
+        {/* Quick Mode Toggle — high-speed capture (skips AI Review) */}
+        <button
+          onClick={onToggleQuickMode}
+          className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm shadow-md border ${
+            quickMode
+              ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500/50 shadow-emerald-500/20'
+              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/50'
+          }`}
+        >
+          {quickMode ? <Zap className="w-5 h-5" /> : <ZapOff className="w-5 h-5" />}
+          {quickMode ? 'Quick Capture ON' : 'Quick Capture OFF'}
+        </button>
 
         <button
           onClick={() => setIsManualOpen(true)}
