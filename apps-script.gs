@@ -173,6 +173,12 @@ function setup() {
   const ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = getOrCreateCaptures_(ss);
 
+  // Always (re)write the header row to the current 23-column layout, so the
+  // headers can never drift out of sync with what doPost() appends. NOTE: if the
+  // sheet already holds rows written in an OLD column order, those rows will not
+  // line up under the new headers — archive/clear them first (see migration note).
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+
   // Column widths (A–W)
   const widths = [155, 95, 95, 115, 120, 140, 95, 110, 120, 120, 150, 60, 70, 80, 110, 220, 220, 90, 200, 95, 110, 240, 100];
   widths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
