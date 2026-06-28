@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, RefreshCw, Check, ArrowLeft, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import { Camera, RefreshCw, Check, ArrowLeft, Wifi, WifiOff, AlertCircle, Upload } from 'lucide-react';
 
 interface PhotoCaptureProps {
   platform: string;
@@ -18,12 +18,27 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Release camera tracks if running
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        setIsCameraActive(false);
+      }
+      setCapturedBlob(file);
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    }
+  };
 
   // Track online/offline status
   useEffect(() => {
@@ -47,12 +62,26 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
       streamRef.current.getTracks().forEach((track) => track.stop());
     }
 
-    // Try back camera first, fall back to any video device
-    const constraintsList = [
+    const savedCameraId = localStorage.getItem('joubie_selected_camera_id');
+    const constraintsList: any[] = [];
+    
+    if (savedCameraId) {
+      constraintsList.push({
+        video: { deviceId: { exact: savedCameraId }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false
+      });
+      constraintsList.push({
+        video: { deviceId: { exact: savedCameraId } },
+        audio: false
+      });
+    }
+
+    // Default ideal fallbacks
+    constraintsList.push(
       { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
       { video: { facingMode: 'environment' }, audio: false },
       { video: true, audio: false }
-    ];
+    );
 
     let stream: MediaStream | null = null;
     for (const constraints of constraintsList) {
@@ -162,7 +191,7 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
     <div className="relative flex flex-col justify-between w-full h-full bg-slate-950 text-white overflow-hidden animate-fade-in">
       
       {/* Top Banner Status Bar */}
-      <div className="z-10 w-full px-4 py-3 glass flex items-center justify-between">
+      <div className="z-10 w-full px-4 py-3 glass flex items-center justify-between" style={{ paddingTop: 'calc(12px + env(safe-area-inset-top))' }}>
         <button
           onClick={onBack}
           className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white cursor-pointer py-1 px-2 hover:bg-slate-800 rounded-lg transition-colors"
@@ -211,57 +240,67 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
           />
         )}
 
-        {/* Viewfinder crosshairs (Only during active camera) */}
-        {!previewUrl && isCameraActive && (
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="w-72 h-72 border border-white/20 rounded-xl relative">
-              <div className="absolute top-1/2 left-0 w-full h-[1px] bg-white/10"></div>
-              <div className="absolute left-1/2 top-0 w-[1px] h-full bg-white/10"></div>
-              {/* Corner hints */}
-              <div className="absolute top-0 left-0 w-4 h-4 border-t border-l border-white/45"></div>
-              <div className="absolute top-0 right-0 w-4 h-4 border-t border-r border-white/45"></div>
-              <div className="absolute bottom-0 left-0 w-4 h-4 border-b border-l border-white/45"></div>
-              <div className="absolute bottom-0 right-0 w-4 h-4 border-b border-r border-white/45"></div>
-            </div>
-            <p className="absolute bottom-6 text-xs text-slate-400 font-semibold bg-slate-950/75 px-4 py-1.5 rounded-full">
-              Position product in center
-            </p>
-          </div>
-        )}
-
         {/* Camera Load / Error Overlays */}
         {errorMsg && (
           <div className="absolute inset-0 bg-slate-950/95 z-20 flex flex-col items-center justify-center p-6 text-center">
             <AlertCircle className="w-12 h-12 text-rose-500 mb-4" />
             <h3 className="text-lg font-bold text-white mb-2">Camera Feed Failed</h3>
             <p className="text-sm text-slate-400 mb-6">{errorMsg}</p>
-            <button
-              onClick={startCamera}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg flex items-center gap-2 cursor-pointer"
-            >
-              <RefreshCw className="w-4 h-4" /> Retry Camera
-            </button>
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+              <button
+                onClick={startCamera}
+                className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl flex items-center justify-center gap-2 cursor-pointer border border-slate-700 transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" /> Retry Camera
+              </button>
+              
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-lg shadow-indigo-500/20"
+              >
+                <Upload className="w-4 h-4" /> Snap or Select Photo
+              </button>
+            </div>
           </div>
         )}
       </div>
 
       {/* Bottom Panel Actions */}
-      <div className="z-10 w-full px-6 py-6 glass flex flex-col items-center gap-4">
+      <div className="z-10 w-full px-4 pt-4 pb-3 glass flex flex-col items-center gap-3" style={{ paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
         
         {/* Shutter Button (Capture state) */}
         {!previewUrl && (
-          <div className="w-full flex justify-center py-2">
+          <div className="w-full flex flex-col items-center gap-3 py-1">
             <button
               onClick={handleShutter}
               disabled={!isCameraActive}
-              className={`w-20 h-20 rounded-full border-4 border-white/80 flex items-center justify-center cursor-pointer transition-all duration-200 ${
+              className={`w-16 h-16 rounded-full border-4 border-white/80 flex items-center justify-center cursor-pointer transition-all duration-200 ${
                 isCameraActive 
                   ? 'bg-red-500 hover:bg-red-600 active:scale-95 shadow-lg shadow-red-500/20 shutter-btn-active' 
                   : 'bg-slate-800 border-slate-700 cursor-not-allowed'
               }`}
             >
-              <Camera className="w-8 h-8 text-white" />
+              <Camera className="w-6 h-6 text-white" />
             </button>
+
+            <span className="text-slate-650 text-[9px] font-black uppercase tracking-widest">or</span>
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-indigo-400 border border-slate-700/50 rounded-xl font-bold flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm shadow-md"
+            >
+              <Upload className="w-4 h-4 text-indigo-400" />
+              Capture or Upload Photo
+            </button>
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="image/*"
+              className="hidden"
+            />
           </div>
         )}
 
@@ -270,14 +309,14 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
           <div className="w-full flex gap-4 animate-scale-up">
             <button
               onClick={handleRetake}
-              className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/50 rounded-xl font-bold flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm shadow-md"
+              className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/50 rounded-xl font-bold flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm shadow-md"
             >
               <RefreshCw className="w-4 h-4 text-indigo-400" />
               Retake Photo
             </button>
             <button
               onClick={handleUsePhoto}
-              className="flex-1 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm shadow-lg shadow-indigo-500/20"
+              className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm shadow-lg shadow-indigo-500/20"
             >
               <Check className="w-5 h-5 text-emerald-400" />
               Use Photo

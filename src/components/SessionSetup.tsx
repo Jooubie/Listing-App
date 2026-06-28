@@ -32,7 +32,7 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
   const isFormValid = photographerId.trim() && platform;
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-slate-950 text-slate-100">
+    <div className="flex flex-col items-center justify-center min-h-full w-full p-6 bg-slate-950 text-slate-100">
       {/* Brand Header */}
       <div className="flex flex-col items-center mb-10 text-center">
         <div className="p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl mb-4 shadow-lg shadow-indigo-500/10">
