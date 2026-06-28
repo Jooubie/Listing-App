@@ -72,8 +72,12 @@ const COL = {
 };
 
 // ── AI classification config ───────────────────────────────
-// Key is NOT stored here — set it once via setApiKey('...') (Script Properties).
-const GEMINI_MODEL                = 'gemini-2.0-flash'; // fast + cheap, ideal for image→taxonomy
+// Keys are NOT stored here — set them in Script Properties (Project Settings):
+//   OPENROUTER_API_KEY  → when AI_PROVIDER = 'openrouter'
+//   GEMINI_API_KEY      → when AI_PROVIDER = 'gemini'
+const AI_PROVIDER                 = 'openrouter';            // 'openrouter' | 'gemini'
+const OPENROUTER_MODEL            = 'google/gemini-2.0-flash-001';
+const GEMINI_MODEL                = 'gemini-2.0-flash';
 const CLASSIFY_BATCH_LIMIT        = 40;   // rows per run; ~3s each → ~2min, well under the 6-min cap
 const CONFIDENCE_REVIEW_THRESHOLD = 0.6;  // below this → needs_review
 const TRIGGER_EVERY_MINUTES       = 1;    // Apps Script minimum; 40 rows/min ≈ 2400/hr ceiling
@@ -214,10 +218,10 @@ function setup() {
   const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
   Logger.log('Captures ready (rows=' + sheet.getLastRow() + '). Drive: ' + folder.getName());
 
-  const hasKey = !!PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  Logger.log(hasKey
-    ? '✅ Gemini key found. AI classification is armed.'
-    : '⚠️ No Gemini key yet — run setApiKey("YOUR_GEMINI_KEY") once so AI can classify.');
+  const keyName = AI_PROVIDER === 'openrouter' ? 'OPENROUTER_API_KEY' : 'GEMINI_API_KEY';
+  Logger.log(getApiKey_()
+    ? '✅ ' + AI_PROVIDER + ' key found. AI classification is armed.'
+    : '⚠️ No key yet — add ' + keyName + ' in Project Settings → Script Properties.');
   Logger.log('✅ Setup complete. Deploy → Manage deployments → New version to go live.');
 }
 
@@ -359,17 +363,27 @@ const TAXONOMY_TEXT = [
   "Section: Other | Category: Other | Sub-Category: Miscellaneous | Product: Other / Unclassified"
 ].join('\n');
 
-// Save the Gemini key ONCE: in the editor run setApiKey('YOUR_KEY'), or set the
-// 'GEMINI_API_KEY' property under Project Settings → Script Properties.
-function setApiKey(key) {
+// Set keys ONCE. Easiest: Project Settings → Script Properties → add
+// OPENROUTER_API_KEY (and/or GEMINI_API_KEY). These helpers are alternatives.
+function setOpenRouterKey(key) {
+  PropertiesService.getScriptProperties().setProperty('OPENROUTER_API_KEY', key);
+  Logger.log('OPENROUTER_API_KEY saved.');
+}
+function setApiKey(key) { // Gemini-direct key
   PropertiesService.getScriptProperties().setProperty('GEMINI_API_KEY', key);
   Logger.log('GEMINI_API_KEY saved.');
+}
+function getApiKey_() {
+  const p = PropertiesService.getScriptProperties();
+  return AI_PROVIDER === 'openrouter'
+    ? p.getProperty('OPENROUTER_API_KEY')
+    : p.getProperty('GEMINI_API_KEY');
 }
 
 // Trigger target — classifies up to CLASSIFY_BATCH_LIMIT pending rows per run.
 function classifyPending() {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-  if (!apiKey) { Logger.log('⚠️ No GEMINI_API_KEY set — run setApiKey("...") once.'); return; }
+  const apiKey = getApiKey_();
+  if (!apiKey) { Logger.log('⚠️ No API key for provider "' + AI_PROVIDER + '". Add it in Script Properties.'); return; }
 
   const ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = ss.getSheetByName(CAPTURES_TAB);
@@ -411,14 +425,20 @@ function classifyPending() {
   Logger.log('classifyPending processed ' + processed + ' row(s).');
 }
 
+// Dispatches to the configured provider. Both read the same Drive image + prompt.
 function classifyImage_(imageUrl, apiKey) {
   const idMatch = String(imageUrl).match(/[-\w]{25,}/);
   if (!idMatch) throw new Error('Could not parse Drive file id from image URL');
   const blob   = DriveApp.getFileById(idMatch[0]).getBlob();
   const base64 = Utilities.base64Encode(blob.getBytes());
+  const prompt = buildPrompt_();
+  return (AI_PROVIDER === 'openrouter')
+    ? classifyViaOpenRouter_(blob, base64, prompt, apiKey)
+    : classifyViaGemini_(blob, base64, prompt, apiKey);
+}
 
-  const prompt =
-    'You are a professional product cataloging assistant for an e-commerce platform.\n' +
+function buildPrompt_() {
+  return 'You are a professional product cataloging assistant for an e-commerce platform.\n' +
     'Analyze the product image and classify it strictly using the taxonomy below, ' +
     'and write marketing-grade product descriptions in Arabic and English.\n\n' +
     'Taxonomy (pick exact matches for section, category, sub_category, product):\n' + TAXONOMY_TEXT + '\n\n' +
@@ -428,7 +448,44 @@ function classifyImage_(imageUrl, apiKey) {
     'Rules: section/category/sub_category/product MUST be exact taxonomy values. ' +
     'color uses short codes (Wht, Blk, Wht-Gry, Blu, Red...). size only if visible else blank. ' +
     'brand if visible else "Unknown". confidence 0.0-1.0. Return ONLY the JSON object.';
+}
 
+// OpenRouter — OpenAI-compatible chat endpoint, image as a base64 data URL.
+function classifyViaOpenRouter_(blob, base64, prompt, apiKey) {
+  const dataUrl = 'data:' + (blob.getContentType() || 'image/jpeg') + ';base64,' + base64;
+  const body = {
+    model: OPENROUTER_MODEL,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: dataUrl } }
+      ]
+    }],
+    temperature: 0.1,
+    max_tokens: 512
+  };
+  const res = UrlFetchApp.fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'Authorization': 'Bearer ' + apiKey,
+      'HTTP-Referer': 'https://github.com/Jooubie/Listing-App',
+      'X-Title': 'Joub Listing App'
+    },
+    payload: JSON.stringify(body),
+    muteHttpExceptions: true
+  });
+  if (res.getResponseCode() !== 200) {
+    throw new Error('OpenRouter HTTP ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+  }
+  const json = JSON.parse(res.getContentText());
+  const msg  = json.choices && json.choices[0] ? json.choices[0].message : null;
+  return parseJson_(msg ? msg.content : '');
+}
+
+// Gemini direct — native generateContent endpoint, image as inlineData.
+function classifyViaGemini_(blob, base64, prompt, apiKey) {
   const body = {
     contents: [{
       parts: [
@@ -438,7 +495,6 @@ function classifyImage_(imageUrl, apiKey) {
     }],
     generationConfig: { temperature: 0.1, topP: 0.8, maxOutputTokens: 512 }
   };
-
   const res = UrlFetchApp.fetch(
     'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent?key=' + apiKey,
     { method: 'post', contentType: 'application/json', payload: JSON.stringify(body), muteHttpExceptions: true }
@@ -446,13 +502,16 @@ function classifyImage_(imageUrl, apiKey) {
   if (res.getResponseCode() !== 200) {
     throw new Error('Gemini HTTP ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
   }
-
   const json  = JSON.parse(res.getContentText());
   const parts = (((json.candidates || [])[0] || {}).content || {}).parts || [];
-  let text    = parts[0] ? parts[0].text : '';
-  if (!text) throw new Error('Empty Gemini response');
-  text = text.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
-  return JSON.parse(text);
+  return parseJson_(parts[0] ? parts[0].text : '');
+}
+
+// Strips markdown fences and parses the model's JSON reply.
+function parseJson_(text) {
+  if (!text) throw new Error('Empty AI response');
+  const cleaned = String(text).replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
+  return JSON.parse(cleaned);
 }
 
 // (Re)creates the classification trigger at TRIGGER_EVERY_MINUTES. Removes any
