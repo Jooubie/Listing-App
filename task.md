@@ -1,0 +1,23 @@
+# Tasks — Photographer PWA Development
+
+- `[x]` Project Scaffolding & Setup
+  - `[x]` Check `npx create-vite --help` options
+  - `[x]` Initialize Vite React + TS app in `./`
+  - `[x]` Configure Tailwind CSS v4
+  - `[x]` Setup Vite PWA plugin configuration
+  - `[x]` Install third-party packages (`@supabase/supabase-js`, `@zxing/browser`, `idb`, `lucide-react`)
+  - `[x]` Create `.env.example` and local `.env`
+- `[x]` Data & Media Utilities
+  - `[x]` Implement canvas-based image resizing and compression (`src/utils/image.ts`)
+  - `[x]` Implement mockable Supabase client wrapper (`src/utils/supabase.ts`)
+  - `[x]` Implement IndexedDB queue for offline stashing and background sync (`src/utils/queue.ts`)
+- `[x]` UI Components & Screens
+  - `[x]` Create session setup screen (`src/components/SessionSetup.tsx`)
+  - `[x]` Create barcode scanner screen with manual entry modal (`src/components/BarcodeScanner.tsx`)
+  - `[x]` Create photo capture screen with preview/retake controls (`src/components/PhotoCapture.tsx`)
+  - `[x]` Assemble state router, running count tally, and platform header in `src/App.tsx`
+- `[x]` Verification & PWA Validation
+  - `[x]` Run visual checks on simulated mobile sizes
+  - `[x]` Verify local persistence of session data and counters
+  - `[x]` Validate mock mode end-to-end flow
+  - `[x]` Verify offline queue, stashing, and automatic online sync
