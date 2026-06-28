@@ -1,25 +1,26 @@
 /**
- * Listing App "Joub" — Google Apps Script Write Proxy  v2
+ * Listing App "Joub" — Google Apps Script Write Proxy  v3
  * ─────────────────────────────────────────────────────────
  * Receives a POST from the PWA (src/utils/sheets.ts → writeRowToSheet),
  * uploads the product photo to Drive, and appends a fully-structured row
- * to the Captures sheet — aligned 1:1 with the data the app actually sends.
+ * to the Captures sheet — aligned 1:1 with the data the app sends, PLUS
+ * two empty slots for your post-processing (AI-edited) product renders.
  *
  * Incoming POST fields (JSON, sent as text/plain to dodge CORS preflight):
  *   timestamp, platform, barcode, photographerId, factoryLocation,
  *   section, category, subCategory, product, size, price, color, brand,
  *   descriptionAr, descriptionEn, confidence, notes, status, imageBase64
  *
- * Sheet columns (A–W) — see HEADERS below.
+ * Sheet columns (A–Y) — see HEADERS below. The app fills everything except
+ * "Edited Image 1/2" and "Listing Status", which your team fills by hand.
  *
  * Deploy:
  *   1. Open target sheet → Extensions → Apps Script → paste this file
  *   2. Confirm SPREADSHEET_ID + DRIVE_FOLDER_ID below
- *   3. Run `setup()` ONCE (creates tabs, headers, formatting, dropdowns, Dashboard)
- *   4. Deploy → New deployment → Web app
- *        Execute as: Me   |   Who has access: Anyone
- *   5. Copy the /exec URL → VITE_APPS_SCRIPT_URL (Vercel env / .env)
- *   ⚠️  Every code edit requires a NEW deployment version to go live.
+ *   3. Run `setup()` ONCE (creates the Captures + Dashboard tabs, headers,
+ *      formatting, dropdowns — your existing tabs are left untouched)
+ *   4. Deploy → Manage deployments → Edit → New version → Deploy
+ *      (keeps the same /exec URL so VITE_APPS_SCRIPT_URL stays valid)
  */
 
 // ═══════════════════════════════════════════════════════════
@@ -34,33 +35,38 @@ const DASHBOARD_TAB = 'Dashboard';
 
 // Column order MUST match the write order in doPost()
 const HEADERS = [
-  'Timestamp',        // A
-  'Date',             // B  (formula)
-  'Platform',         // C
-  'Photographer',     // D
-  'Factory',          // E
-  'Barcode',          // F
-  'Duplicate?',       // G  (formula)
-  'Section',          // H
-  'Category',         // I
-  'Sub-Category',     // J
-  'Product',          // K
-  'Size',             // L
-  'Price',            // M
-  'Color',            // N
-  'Brand',            // O
-  'Description (AR)', // P
-  'Description (EN)', // Q
-  'AI Confidence',    // R
-  'Notes',            // S
-  'Status',           // T
-  'Image Preview',    // U  (=IMAGE formula)
-  'Image URL',        // V
-  'Listing Status'    // W
+  'Timestamp',          // A
+  'Date',               // B  (formula)
+  'Platform',           // C
+  'Photographer',       // D
+  'Factory',            // E
+  'Barcode',            // F
+  'Duplicate?',         // G  (formula)
+  'Section',            // H
+  'Category',           // I
+  'Sub-Category',       // J
+  'Product',            // K
+  'Size',               // L
+  'Price',              // M
+  'Color',              // N
+  'Brand',              // O
+  'Description (AR)',   // P
+  'Description (EN)',   // Q
+  'AI Confidence',      // R
+  'Notes',              // S
+  'Status',             // T
+  'Original Image',     // U  (=IMAGE preview, app-filled)
+  'Original Image URL', // V  (raw link, app-filled — feed this to the AI editor)
+  'Edited Image 1',     // W  (team pastes the edited render link)
+  'Edited Image 2',     // X  (team pastes the second edited render link)
+  'Listing Status'      // Y  (team-managed)
 ];
 
-// 1-based column indexes for formula cells
-const COL = { DATE: 2, BARCODE: 6, DUP: 7, CONFIDENCE: 18, STATUS: 20, PREVIEW: 21, IMAGE_URL: 22, LISTING: 23 };
+// 1-based column indexes
+const COL = {
+  DATE: 2, BARCODE: 6, DUP: 7, CONFIDENCE: 18, STATUS: 20,
+  ORIG_PREVIEW: 21, ORIG_URL: 22, EDITED1: 23, EDITED2: 24, LISTING: 25
+};
 
 // Platform brand colors for subtle row tinting (metadata columns only)
 const PLATFORM_COLORS = {
@@ -80,7 +86,7 @@ function doGet() {
   return json_({
     success: true,
     status: 'ok',
-    message: 'Joub Listing App Script v2 is running',
+    message: 'Joub Listing App Script v3 is running',
     totalCaptures: rows,
     time: new Date().toISOString()
   });
@@ -135,9 +141,11 @@ function doPost(e) {
       data.confidence != null ? data.confidence : '', // R  AI Confidence
       data.notes           || '',   // S  Notes
       data.status          || 'confirmed', // T  Status
-      '',                           // U  Image Preview (formula below)
-      imageUrl,                     // V  Image URL
-      'Not Listed'                  // W  Listing Status
+      '',                           // U  Original Image (formula below)
+      imageUrl,                     // V  Original Image URL
+      '',                           // W  Edited Image 1 (team fills)
+      '',                           // X  Edited Image 2 (team fills)
+      'Not Listed'                  // Y  Listing Status
     ]);
 
     // 4. Formulas
@@ -146,7 +154,7 @@ function doPost(e) {
       `=IF(COUNTIF(F$2:F${row},F${row})>1,"⚠️ DUPLICATE","")`
     );
     if (imageUrl) {
-      sheet.getRange(row, COL.PREVIEW).setFormula(`=IMAGE("${imageUrl}")`);
+      sheet.getRange(row, COL.ORIG_PREVIEW).setFormula(`=IMAGE("${imageUrl}")`);
     }
 
     // 5. Visual cues
@@ -167,20 +175,19 @@ function doPost(e) {
 }
 
 // ───────────────────────────────────────────────────────────
-//  SETUP — run once
+//  SETUP — run once (safe: only touches Captures + Dashboard tabs)
 // ───────────────────────────────────────────────────────────
 function setup() {
   const ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = getOrCreateCaptures_(ss);
 
-  // Always (re)write the header row to the current 23-column layout, so the
-  // headers can never drift out of sync with what doPost() appends. NOTE: if the
-  // sheet already holds rows written in an OLD column order, those rows will not
-  // line up under the new headers — archive/clear them first (see migration note).
+  // Always (re)write the header row to the current layout so headers can never
+  // drift out of sync with what doPost() appends. Existing tabs other than
+  // 'Captures' / 'Dashboard' are never touched.
   sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
 
-  // Column widths (A–W)
-  const widths = [155, 95, 95, 115, 120, 140, 95, 110, 120, 120, 150, 60, 70, 80, 110, 220, 220, 90, 200, 95, 110, 240, 100];
+  // Column widths (A–Y)
+  const widths = [155, 95, 95, 115, 120, 140, 95, 110, 120, 120, 150, 60, 70, 80, 110, 220, 220, 90, 200, 95, 110, 230, 150, 150, 100];
   widths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
 
   sheet.setFrozenRows(1);
@@ -191,15 +198,14 @@ function setup() {
     .setBackground('#1e293b').setFontColor('#94a3b8')
     .setFontWeight('bold').setFontSize(10).setVerticalAlignment('middle');
 
-  // Number/format hints
-  sheet.getRange(2, COL.CONFIDENCE, 2000, 1).setNumberFormat('0%'); // AI Confidence as %
+  sheet.getRange(2, COL.CONFIDENCE, 5000, 1).setNumberFormat('0%'); // AI Confidence as %
 
   addDropdowns_(sheet);
   buildDashboard_(ss);
 
   const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
   Logger.log('Captures ready (rows=' + sheet.getLastRow() + '). Drive: ' + folder.getName());
-  Logger.log('✅ Setup complete. Deploy → New deployment → Web app to go live.');
+  Logger.log('✅ Setup complete. Deploy → Manage deployments → New version to go live.');
 }
 
 // ───────────────────────────────────────────────────────────
@@ -228,12 +234,12 @@ function colorRowByPlatform_(sheet, row, platform) {
 }
 
 function addDropdowns_(sheet) {
-  const set = (col, values) => sheet.getRange(2, col, 2000, 1).setDataValidation(
+  const set = (col, values) => sheet.getRange(2, col, 5000, 1).setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(values, true).build()
   );
-  set(3,  ['amazon', 'noon', 'al_nasser', 'jumia']);            // C Platform
-  set(COL.STATUS, ['confirmed', 'needs_review']);               // T Status
-  set(COL.LISTING, ['Not Listed', 'Listed', 'Live']);          // W Listing Status
+  set(3,  ['amazon', 'noon', 'al_nasser', 'jumia']);   // C Platform
+  set(COL.STATUS, ['confirmed', 'needs_review']);      // T Status
+  set(COL.LISTING, ['Not Listed', 'Listed', 'Live']);  // Y Listing Status
 }
 
 function buildDashboard_(ss) {
@@ -260,10 +266,14 @@ function buildDashboard_(ss) {
     ['Confirmed',     `=COUNTIF(${C}!T2:T,"confirmed")`],
     ['Duplicates',    `=COUNTIF(${C}!G2:G,"⚠️ DUPLICATE")`],
     ['', ''],
+    ['── Image Editing ──', ''],
+    ['Edited done',   `=COUNTIF(${C}!W2:W,"<>")`],
+    ['Awaiting edit', `=COUNTA(${C}!V2:V)-COUNTIF(${C}!W2:W,"<>")`],
+    ['', ''],
     ['── Listing Progress ──', ''],
-    ['Not Listed',    `=COUNTIF(${C}!W2:W,"Not Listed")`],
-    ['Listed',        `=COUNTIF(${C}!W2:W,"Listed")`],
-    ['Live',          `=COUNTIF(${C}!W2:W,"Live")`],
+    ['Not Listed',    `=COUNTIF(${C}!Y2:Y,"Not Listed")`],
+    ['Listed',        `=COUNTIF(${C}!Y2:Y,"Listed")`],
+    ['Live',          `=COUNTIF(${C}!Y2:Y,"Live")`],
     ['', ''],
     ['Last refreshed', `=NOW()`]
   ];
@@ -272,7 +282,7 @@ function buildDashboard_(ss) {
   dash.getRange('A1').setFontSize(16).setFontWeight('bold').setFontColor('#e2e8f0');
   dash.setColumnWidth(1, 170);
   dash.setColumnWidth(2, 110);
-  [3, 7, 13, 18].forEach(r => dash.getRange(r, 1).setFontWeight('bold').setFontColor('#6366f1'));
+  [3, 7, 13, 18, 22].forEach(r => dash.getRange(r, 1).setFontWeight('bold').setFontColor('#6366f1'));
 }
 
 function json_(obj) {
