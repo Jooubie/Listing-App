@@ -135,10 +135,8 @@ export default function App() {
   };
 
   const handleResetSession = () => {
-    if (confirm('Change platform or photographer? This resets your session.')) {
-      setActiveScreen('setup');
-      localStorage.removeItem('joubie_active_screen');
-    }
+    setActiveScreen('setup');
+    localStorage.removeItem('joubie_active_screen');
   };
 
   return (
