@@ -2,7 +2,7 @@
 
 This is the mobile-first Progressive Web App (PWA) designed for warehouse photographers to quickly scan retail product barcodes and take product photographs.
 
-The application acts as a high-speed capture buffer that writes directly to **Supabase Storage** and the **`captures`** table, decoupling real-time field scans from slow vision AI classification and Google Sheet synchronization.
+The application acts as a high-speed capture buffer that stores scans locally when needed, then writes rows through a Google Apps Script proxy into Google Sheets. It is optimized for fast field capture, offline retries, and a minimal mobile workflow.
 
 ## 🚀 Quick Start
 
@@ -17,10 +17,8 @@ Create a `.env` file in the root directory (based on `.env.example`):
 # Set VITE_MOCK_MODE to true to run fully backend-free
 VITE_MOCK_MODE=true
 
-# If VITE_MOCK_MODE=false, provide valid Supabase credentials
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-publishable-anon-key
-VITE_SUPABASE_BUCKET=product-images
+# If VITE_MOCK_MODE=false, provide the deployed Google Apps Script URL
+VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec
 ```
 
 ### 3. Start Development Server
@@ -35,14 +33,13 @@ npm run dev
 The app supports two execution modes out of the box:
 
 1. **Mock Mode (Default)**:
-   * Enabled when `VITE_MOCK_MODE=true` or when Supabase variables are left empty.
-   * Simulates image resizing, uploads, and database inserts in memory.
+   * Enabled when `VITE_MOCK_MODE=true` or when the Apps Script URL is missing.
+   * Simulates image resizing and row writes in memory.
    * Generates local object URLs for previewing captures, enabling complete workflow testing without a database.
 2. **Live Mode**:
-   * Enabled when `VITE_MOCK_MODE=false` and credentials are provided.
-   * Compresses the snapped image client-side to a maximum of 1600px (long edge, `0.8` JPEG quality).
-   * Uploads the image to the Supabase Storage bucket at path `{platform}/{YYYY-MM-DD}/{uuid}.jpg` and retrieves its public URL.
-   * Inserts a metadata row into the `captures` table with `status = 'pending'`, leaving all downstream classification fields blank.
+   * Enabled when `VITE_MOCK_MODE=false` and `VITE_APPS_SCRIPT_URL` is set.
+   * Compresses the snapped image client-side to keep payloads small.
+   * Posts the capture payload to the Google Apps Script web app, which writes the row and image reference into Google Sheets.
 
 ---
 
@@ -53,6 +50,13 @@ Photographers often scan in warehouses with unstable Wi-Fi. The application impl
 * **IndexedDB Cache**: If a submission fails due to network issues or the browser is in offline state, the scan (barcode, photographer ID, platform, and image blob) is queued locally using **IndexedDB**.
 * **Frictionless Loop**: The app increments the photographer's tally and immediately returns to the scan screen, ensuring they are never blocked by network delays.
 * **Automatic Background Sync**: When connection is restored, the application subscribes to the browser's `online` event, automatically draining the IndexedDB queue FIFO in the background. A syncing progress bar is displayed at the top of the interface.
+
+## Project Notes
+
+* `src/utils/supabase.ts` is currently unused in the running app and should be treated as legacy or future work.
+* The current frontend does not implement on-device AI classification or a review/confirm screen yet.
+* The operator flow now includes a compact live dashboard with scanned, done, and queued counts plus a manual batch sync action.
+* The intended production loop is: scan barcode, capture one clean product photo, keep moving, then sync the batch while the sheet and AI finish the listing data.
 
 ---
 

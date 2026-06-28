@@ -1,6 +1,6 @@
 import { useEffect, useState, lazy, Suspense, useCallback } from 'react';
 import { resizeImage } from './utils/image';
-import { isMockMode } from './utils/sheets';
+import { isMockMode, writeRowToSheet } from './utils/sheets';
 import { enqueueCapture, getQueueSize, syncOfflineQueue } from './utils/queue';
 import { Loader2, Wifi } from 'lucide-react';
 
@@ -43,6 +43,8 @@ export default function App() {
     totalCount: number;
     currentItem?: any;
   } | null>(null);
+
+  const doneCount = Math.max(sessionCount - queueSize, 0);
 
   useEffect(() => {
     if (activeScreen === 'setup') {
@@ -118,12 +120,47 @@ export default function App() {
         }
       }
 
-      await enqueueCapture({
-        platform,
-        barcode: activeBarcode,
-        imageBlob,
-        photographer_id: photographerId,
-      });
+      // If IndexedDB rejects the blob (quota / mobile browser limits), keep the
+      // capture moving by retrying without the image. The row can still be written.
+      try {
+        await enqueueCapture({
+          platform,
+          barcode: activeBarcode,
+          imageBlob,
+          photographer_id: photographerId,
+        });
+      } catch (queueErr) {
+        console.warn('[App] Queueing with image failed, retrying without image:', queueErr);
+        try {
+          await enqueueCapture({
+            platform,
+            barcode: activeBarcode,
+            imageBlob: null,
+            photographer_id: photographerId,
+          });
+        } catch (queueFallbackErr) {
+          console.warn('[App] Queueing without image failed, writing directly to sheet:', queueFallbackErr);
+          await writeRowToSheet({
+            platform,
+            barcode: activeBarcode,
+            photographerId,
+            section: '',
+            category: '',
+            subCategory: '',
+            product: '',
+            size: '',
+            price: '',
+            color: '',
+            brand: '',
+            descriptionAr: '',
+            descriptionEn: '',
+            confidence: 0,
+            notes: '',
+            imageBlob: imageBlob ?? undefined,
+            status: 'pending',
+          });
+        }
+      }
 
       const size = await getQueueSize();
       setQueueSize(size);
@@ -135,7 +172,7 @@ export default function App() {
       // Reset and return to scanning immediately — keep the loop fast
       setActiveBarcode('');
       setActiveScreen('scan');
-      triggerSync();
+      void triggerSync();
     } catch (err) {
       console.error('[App] Capture processing failed:', err);
       alert('Failed to save capture. Please try again.');
@@ -178,8 +215,11 @@ export default function App() {
             photographerId={photographerId}
             onDecode={handleBarcodeDecoded}
             onChangeSession={handleResetSession}
+            onSyncBatch={triggerSync}
             offlineCount={queueSize}
+            doneCount={doneCount}
             sessionCount={sessionCount}
+            isSyncing={Boolean(syncProgress)}
           />
         </Suspense>
       )}
@@ -194,9 +234,13 @@ export default function App() {
           <PhotoCapture
             platform={platform}
             barcode={activeBarcode}
+            scannedCount={sessionCount}
+            doneCount={doneCount}
             onCapture={handleCaptureComplete}
             onBack={() => setActiveScreen('scan')}
             offlineCount={queueSize}
+            onSyncBatch={triggerSync}
+            isSyncing={Boolean(syncProgress)}
           />
         </Suspense>
       )}

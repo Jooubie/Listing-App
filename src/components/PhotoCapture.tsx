@@ -1,12 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, RefreshCw, Check, ArrowLeft, Wifi, WifiOff, Upload, ImageOff, X } from 'lucide-react';
+import { Camera, RefreshCw, Check, ArrowLeft, Upload, ImageOff, X } from 'lucide-react';
+import { SessionDashboard } from './SessionDashboard';
 
 interface PhotoCaptureProps {
   platform: string;
   barcode: string;
+  scannedCount: number;
+  doneCount: number;
   onCapture: (blob: Blob | null) => void;
   onBack: () => void;
   offlineCount: number;
+  onSyncBatch: () => void;
+  isSyncing: boolean;
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -14,7 +19,7 @@ const PLATFORM_LABELS: Record<string, string> = {
 };
 
 export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
-  platform, barcode, onCapture, onBack, offlineCount
+  platform, barcode, scannedCount, doneCount, onCapture, onBack, offlineCount, onSyncBatch, isSyncing
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -138,12 +143,26 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
           <span className="text-sm font-black text-indigo-300 font-mono">{barcode}</span>
         </div>
 
-        <span className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
           isOnline ? 'text-emerald-400 bg-emerald-950/40 border-emerald-500/20' : 'text-rose-400 bg-rose-950/40 border-rose-500/20'
         }`}>
-          {isOnline ? <Wifi className="w-2.5 h-2.5" /> : <WifiOff className="w-2.5 h-2.5" />}
           {isOnline ? 'Online' : 'Offline'}
         </span>
+      </div>
+
+      <SessionDashboard
+        scannedCount={scannedCount}
+        doneCount={doneCount}
+        queuedCount={offlineCount}
+        isOnline={isOnline}
+        isSyncing={isSyncing}
+        onSyncBatch={onSyncBatch}
+      />
+
+      <div className="px-4 pt-2">
+        <p className="text-[10px] font-medium text-slate-500 tracking-wide text-center">
+          One clean shot is enough. Keep the product centered and move on.
+        </p>
       </div>
 
       {/* ── Viewport ── */}
@@ -195,7 +214,7 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
                 className="w-14 h-14 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors"
               >
                 <Upload className="w-5 h-5 text-indigo-400" />
-                <span className="text-[9px] text-slate-400 font-bold">Gallery</span>
+                <span className="text-[9px] text-slate-400 font-bold">Files</span>
               </button>
 
               {/* Shutter */}
@@ -230,7 +249,7 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
               className="w-full py-3 text-slate-500 hover:text-slate-300 font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer text-xs uppercase tracking-wider border border-slate-800 rounded-2xl hover:border-slate-700"
             >
               <ImageOff className="w-3.5 h-3.5" />
-              Skip Photo — Submit Without Image
+              Skip Photo
             </button>
 
             {/* Status */}

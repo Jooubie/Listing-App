@@ -20,12 +20,12 @@ Set up these columns in row 1 (exact order matters for the Apps Script):
 | B   | Platform      | Text          | App (amazon/noon/al_nasser/jumia)        |
 | C   | Photographer  | Text          | App                                      |
 | D   | Barcode       | Text          | App (camera scan)                        |
-| E   | Category      | Text          | Confirmed by photographer (AI suggested) |
-| F   | Sub-Category  | Text          | Confirmed by photographer (AI suggested) |
-| G   | Product Type  | Text          | Confirmed by photographer (AI suggested) |
-| H   | Product Name  | Text          | Confirmed by photographer (AI suggested) |
-| I   | Brand         | Text          | Confirmed by photographer (AI suggested) |
-| J   | AI Confidence | Number (0–1) | Gemini Vision                            |
+| E   | Category      | Text          | Future AI / manual review                 |
+| F   | Sub-Category  | Text          | Future AI / manual review                 |
+| G   | Product Type  | Text          | Future AI / manual review                 |
+| H   | Product Name  | Text          | Future AI / manual review                 |
+| I   | Brand         | Text          | Future AI / manual review                 |
+| J   | AI Confidence | Number (0–1) | Future AI classifier                      |
 | K   | Notes         | Text          | Photographer                             |
 | L   | Image URL     | URL           | Apps Script → Google Drive              |
 | M   | Status        | Text          | `confirmed` or `needs_review`        |
@@ -39,7 +39,7 @@ Set up these columns in row 1 (exact order matters for the Apps Script):
 
 ### Data Validation Dropdowns (Optional but recommended)
 
-Add dropdown validation to the following columns so Amr can correct AI mistakes directly in the sheet:
+Add dropdown validation to the following columns so Amr can correct values directly in the sheet:
 
 - **Column B (Platform):** `amazon, noon, al_nasser, jumia`
 - **Column E (Category):** Your category list
@@ -149,13 +149,13 @@ function doGet() {
 Copy `.env.example` to `.env` and fill in your values:
 
 ```bash
-VITE_GEMINI_API_KEY=AQ.Ab8RN6K6sBNukfLSFJC0Bqb4YtHyuX7DY8E4G6X2dQ0Wk8bscw
-VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/AKfycb.../exec
+VITE_GEMINI_API_KEY=your_gemini_api_key_here
+VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec
 VITE_MOCK_MODE=false
 ```
 
 Get your Gemini API key from: https://aistudio.google.com/app/apikey
-It's free with generous limits (1,500 requests/day on the free tier).
+Only add it if you later wire in the AI classification phase.
 
 ---
 
@@ -165,4 +165,4 @@ The category/sub-category/product type dropdowns in the app are defined in:
 `src/data/taxonomy.ts`
 
 When Amr provides his actual category structure, edit that file.
-The AI prompt and all dropdowns in the review screen update automatically.
+The taxonomy file drives downstream validation and any future AI prompt or review screen.

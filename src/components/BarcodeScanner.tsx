@@ -1,15 +1,19 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { DecodeHintType, BarcodeFormat } from '@zxing/library';
-import { AlertCircle, RefreshCw, Keyboard, Wifi, WifiOff, X, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, RefreshCw, Keyboard, X, CheckCircle2 } from 'lucide-react';
+import { SessionDashboard } from './SessionDashboard';
 
 interface BarcodeScannerProps {
   platform: string;
   photographerId: string;
   onDecode: (barcode: string) => void;
   onChangeSession: () => void;
+  onSyncBatch: () => void;
   offlineCount: number;
+  doneCount: number;
   sessionCount: number;
+  isSyncing: boolean;
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -21,8 +25,11 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   photographerId,
   onDecode,
   onChangeSession,
+  onSyncBatch,
   offlineCount,
-  sessionCount
+  doneCount,
+  sessionCount,
+  isSyncing
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<any>(null);
@@ -171,21 +178,10 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         <div className="flex flex-col items-center">
           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Scanned</span>
           <span className="text-3xl font-black text-emerald-400 leading-none">{sessionCount}</span>
-          {offlineCount > 0 && (
-            <span className="text-[9px] font-bold text-amber-400 mt-0.5">{offlineCount} queued</span>
-          )}
         </div>
 
-        {/* Right: status + change */}
+        {/* Right: change */}
         <div className="flex flex-col items-end gap-1.5">
-          <span className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-            isOnline
-              ? 'text-emerald-400 bg-emerald-950/40 border-emerald-500/20'
-              : 'text-rose-400 bg-rose-950/40 border-rose-500/20'
-          }`}>
-            {isOnline ? <Wifi className="w-2.5 h-2.5" /> : <WifiOff className="w-2.5 h-2.5" />}
-            {isOnline ? 'Online' : 'Offline'}
-          </span>
           <button
             id="change-session-btn"
             onClick={onChangeSession}
@@ -195,6 +191,15 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           </button>
         </div>
       </div>
+
+      <SessionDashboard
+        scannedCount={sessionCount}
+        doneCount={doneCount}
+        queuedCount={offlineCount}
+        isOnline={isOnline}
+        isSyncing={isSyncing}
+        onSyncBatch={onSyncBatch}
+      />
 
       {/* ── Viewfinder (fills all remaining space) ── */}
       <div className="relative flex-1 flex items-center justify-center bg-black overflow-hidden">
@@ -220,7 +225,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
               <div className="absolute w-full h-0.5 bg-red-500 shadow-[0_0_12px_#ef4444] top-1/2 animate-bounce" />
             </div>
             <p className="mt-5 text-xs font-semibold text-white/70 bg-black/50 px-4 py-1.5 rounded-full tracking-wide">
-              Align barcode in frame
+              Scan barcode, then capture one clean photo
             </p>
           </div>
         )}
@@ -287,7 +292,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white border-0 rounded-2xl font-bold flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-base shadow-lg shadow-indigo-500/20"
         >
           <Keyboard className="w-5 h-5" />
-          Type Barcode Manually
+          Enter Barcode
         </button>
       </div>
 
