@@ -73,8 +73,9 @@ const COL = {
 
 // ── AI classification config ───────────────────────────────
 const GEMINI_MODEL                = 'gemini-1.5-flash';
-const CLASSIFY_BATCH_LIMIT        = 25;   // rows per trigger run (respect 6-min limit + API quota)
+const CLASSIFY_BATCH_LIMIT        = 40;   // rows per run; ~3s each → ~2min, well under the 6-min cap
 const CONFIDENCE_REVIEW_THRESHOLD = 0.6;  // below this → needs_review
+const TRIGGER_EVERY_MINUTES       = 1;    // Apps Script minimum; 40 rows/min ≈ 2400/hr ceiling
 
 // Platform brand colors for subtle row tinting (identity columns only)
 const PLATFORM_COLORS = {
@@ -207,7 +208,7 @@ function setup() {
 
   addDropdowns_(sheet);
   buildDashboard_(ss);
-  ensureTrigger_(); // schedule server-side AI classification every 5 min
+  ensureTrigger_(); // schedule server-side AI classification (every 1 min)
 
   const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
   Logger.log('Captures ready (rows=' + sheet.getLastRow() + '). Drive: ' + folder.getName());
@@ -453,11 +454,12 @@ function classifyImage_(imageUrl, apiKey) {
   return JSON.parse(text);
 }
 
-// Creates the 5-minute classification trigger if one doesn't already exist.
+// (Re)creates the classification trigger at TRIGGER_EVERY_MINUTES. Removes any
+// existing classifyPending trigger first so re-running setup() updates the interval.
 function ensureTrigger_() {
-  const exists = ScriptApp.getProjectTriggers()
-    .some(t => t.getHandlerFunction() === 'classifyPending');
-  if (exists) { Logger.log('classifyPending trigger already exists.'); return; }
-  ScriptApp.newTrigger('classifyPending').timeBased().everyMinutes(5).create();
-  Logger.log('Created classifyPending trigger (every 5 min).');
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'classifyPending') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('classifyPending').timeBased().everyMinutes(TRIGGER_EVERY_MINUTES).create();
+  Logger.log('classifyPending trigger set to every ' + TRIGGER_EVERY_MINUTES + ' min.');
 }
