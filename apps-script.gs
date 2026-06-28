@@ -2,24 +2,26 @@
  * Listing App "Joub" — Google Apps Script Write Proxy  v3
  * ─────────────────────────────────────────────────────────
  * Receives a POST from the PWA (src/utils/sheets.ts → writeRowToSheet),
- * uploads the product photo to Drive, and appends a fully-structured row
- * to the Captures sheet — aligned 1:1 with the data the app sends, PLUS
- * two empty slots for your post-processing (AI-edited) product renders.
+ * uploads the product photo to Drive, and appends a row to the Captures sheet
+ * as status=pending. A timed trigger (classifyPending) then classifies each
+ * pending row with Gemini server-side and fills the AI columns.
+ *
+ * Setup screen sends only: photographer name + platform (ecommerce). No factory.
  *
  * Incoming POST fields (JSON, sent as text/plain to dodge CORS preflight):
- *   timestamp, platform, barcode, photographerId, factoryLocation,
+ *   timestamp, platform, barcode, photographerId,
  *   section, category, subCategory, product, size, price, color, brand,
  *   descriptionAr, descriptionEn, confidence, notes, status, imageBase64
  *
- * Sheet columns (A–Y) — see HEADERS below. The app fills everything except
- * "Edited Image 1/2" and "Listing Status", which your team fills by hand.
+ * Sheet columns (A–X) — see HEADERS below. The app fills capture data + image;
+ * the trigger fills AI fields; the owner fills Price + Edited Image 1/2 + Listing.
  *
  * Deploy:
  *   1. Open target sheet → Extensions → Apps Script → paste this file
  *   2. Confirm SPREADSHEET_ID + DRIVE_FOLDER_ID below
- *   3. Run `setup()` ONCE (creates the Captures + Dashboard tabs, headers,
- *      formatting, dropdowns — your existing tabs are left untouched)
- *   4. Deploy → Manage deployments → Edit → New version → Deploy
+ *   3. Run setApiKey('YOUR_GEMINI_KEY') ONCE
+ *   4. Run setup() ONCE (builds Captures + Dashboard tabs, dropdowns, AI trigger)
+ *   5. Deploy → Manage deployments → Edit → New version → Deploy
  *      (keeps the same /exec URL so VITE_APPS_SCRIPT_URL stays valid)
  */
 
@@ -39,35 +41,34 @@ const HEADERS = [
   'Date',               // B  (formula)
   'Ecommerce',          // C  (platform: amazon / noon / al_nasser / jumia)
   'Photographer',       // D
-  'Factory',            // E
-  'Barcode',            // F
-  'Duplicate?',         // G  (formula)
-  'Section',            // H
-  'Category',           // I
-  'Sub-Category',       // J
-  'Product',            // K
-  'Size',               // L
-  'Price',              // M
-  'Color',              // N
-  'Brand',              // O
-  'Description (AR)',   // P
-  'Description (EN)',   // Q
-  'AI Confidence',      // R
-  'Notes',              // S
-  'Status',             // T
-  'Original Image',     // U  (=IMAGE preview, app-filled)
-  'Original Image URL', // V  (raw link, app-filled — feed this to the AI editor)
-  'Edited Image 1',     // W  (team pastes the edited render link)
-  'Edited Image 2',     // X  (team pastes the second edited render link)
-  'Listing Status'      // Y  (team-managed)
+  'Barcode',            // E
+  'Duplicate?',         // F  (formula)
+  'Section',            // G
+  'Category',           // H
+  'Sub-Category',       // I
+  'Product',            // J
+  'Size',               // K
+  'Price',              // L  (owner-filled)
+  'Color',              // M
+  'Brand',              // N
+  'Description (AR)',   // O
+  'Description (EN)',   // P
+  'AI Confidence',      // Q
+  'Notes',              // R
+  'Status',             // S
+  'Original Image',     // T  (=IMAGE preview, app-filled)
+  'Original Image URL', // U  (raw link, app-filled — feed this to the AI editor)
+  'Edited Image 1',     // V  (team pastes the edited render link)
+  'Edited Image 2',     // W  (team pastes the second edited render link)
+  'Listing Status'      // X  (team-managed)
 ];
 
 // 1-based column indexes
 const COL = {
-  DATE: 2, BARCODE: 6, DUP: 7,
-  SECTION: 8, CATEGORY: 9, SUBCAT: 10, PRODUCT: 11, SIZE: 12, PRICE: 13,
-  COLOR: 14, BRAND: 15, DESC_AR: 16, DESC_EN: 17, CONFIDENCE: 18, NOTES: 19,
-  STATUS: 20, ORIG_PREVIEW: 21, ORIG_URL: 22, EDITED1: 23, EDITED2: 24, LISTING: 25
+  DATE: 2, BARCODE: 5, DUP: 6,
+  SECTION: 7, CATEGORY: 8, SUBCAT: 9, PRODUCT: 10, SIZE: 11, PRICE: 12,
+  COLOR: 13, BRAND: 14, DESC_AR: 15, DESC_EN: 16, CONFIDENCE: 17, NOTES: 18,
+  STATUS: 19, ORIG_PREVIEW: 20, ORIG_URL: 21, EDITED1: 22, EDITED2: 23, LISTING: 24
 };
 
 // ── AI classification config ───────────────────────────────
@@ -75,7 +76,7 @@ const GEMINI_MODEL                = 'gemini-1.5-flash';
 const CLASSIFY_BATCH_LIMIT        = 25;   // rows per trigger run (respect 6-min limit + API quota)
 const CONFIDENCE_REVIEW_THRESHOLD = 0.6;  // below this → needs_review
 
-// Platform brand colors for subtle row tinting (metadata columns only)
+// Platform brand colors for subtle row tinting (identity columns only)
 const PLATFORM_COLORS = {
   amazon:    '#2d1b00',
   noon:      '#2d2900',
@@ -130,35 +131,35 @@ function doPost(e) {
     sheet.appendRow([
       captureTime,                  // A  Timestamp
       '',                           // B  Date (formula below)
-      data.platform        || '',   // C  Platform
+      data.platform        || '',   // C  Ecommerce
       data.photographerId  || '',   // D  Photographer
-      data.factoryLocation || '',   // E  Factory
-      barcode,                      // F  Barcode
-      '',                           // G  Duplicate? (formula below)
-      data.section         || '',   // H  Section
-      data.category        || '',   // I  Category
-      data.subCategory     || '',   // J  Sub-Category
-      data.product         || '',   // K  Product
-      data.size            || '',   // L  Size
-      data.price           || '',   // M  Price
-      data.color           || '',   // N  Color
-      data.brand           || '',   // O  Brand
-      data.descriptionAr   || '',   // P  Description (AR)
-      data.descriptionEn   || '',   // Q  Description (EN)
-      data.confidence != null ? data.confidence : '', // R  AI Confidence
-      data.notes           || '',   // S  Notes
-      data.status          || 'pending', // T  Status (AI fills, then flips to confirmed/needs_review)
-      '',                           // U  Original Image (formula below)
-      imageUrl,                     // V  Original Image URL
-      '',                           // W  Edited Image 1 (team fills)
-      '',                           // X  Edited Image 2 (team fills)
-      'Not Listed'                  // Y  Listing Status
+      barcode,                      // E  Barcode
+      '',                           // F  Duplicate? (formula below)
+      data.section         || '',   // G  Section
+      data.category        || '',   // H  Category
+      data.subCategory     || '',   // I  Sub-Category
+      data.product         || '',   // J  Product
+      data.size            || '',   // K  Size
+      data.price           || '',   // L  Price
+      data.color           || '',   // M  Color
+      data.brand           || '',   // N  Brand
+      data.descriptionAr   || '',   // O  Description (AR)
+      data.descriptionEn   || '',   // P  Description (EN)
+      data.confidence != null ? data.confidence : '', // Q  AI Confidence
+      data.notes           || '',   // R  Notes
+      data.status          || 'pending', // S  Status (AI fills, then flips)
+      '',                           // T  Original Image (formula below)
+      imageUrl,                     // U  Original Image URL
+      '',                           // V  Edited Image 1 (team fills)
+      '',                           // W  Edited Image 2 (team fills)
+      'Not Listed'                  // X  Listing Status
     ]);
 
     // 4. Formulas
+    const bc = colLetter_(COL.BARCODE);
     sheet.getRange(row, COL.DATE).setFormula(`=TEXT(A${row},"YYYY-MM-DD")`);
     sheet.getRange(row, COL.DUP).setFormula(
-      `=IF(COUNTIF(F$2:F${row},F${row})>1,"⚠️ DUPLICATE","")`
+      `=IF(COUNTIF(${bc}$2:${bc}${row},${bc}${row})>1,"⚠️ DUPLICATE","")`
     );
     if (imageUrl) {
       sheet.getRange(row, COL.ORIG_PREVIEW).setFormula(`=IMAGE("${imageUrl}")`);
@@ -168,9 +169,6 @@ function doPost(e) {
     colorRowByPlatform_(sheet, row, data.platform || '');
     if (isDuplicate) {
       sheet.getRange(row, COL.DUP).setBackground('#3d2800').setFontColor('#fbbf24');
-    }
-    if ((data.status || '') === 'needs_review') {
-      sheet.getRange(row, COL.STATUS).setBackground('#3d2800').setFontColor('#fbbf24');
     }
 
     return json_({ success: true, imageUrl, rowNumber: row, duplicate: isDuplicate });
@@ -189,16 +187,16 @@ function setup() {
   const sheet = getOrCreateCaptures_(ss);
 
   // Always (re)write the header row to the current layout so headers can never
-  // drift out of sync with what doPost() appends. Existing tabs other than
+  // drift out of sync with what doPost() appends. Tabs other than
   // 'Captures' / 'Dashboard' are never touched.
   sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
 
-  // Column widths (A–Y)
-  const widths = [155, 95, 95, 115, 120, 140, 95, 110, 120, 120, 150, 60, 70, 80, 110, 220, 220, 90, 200, 95, 110, 230, 150, 150, 100];
+  // Column widths (A–X)
+  const widths = [155, 95, 95, 115, 140, 95, 110, 120, 120, 150, 60, 70, 80, 110, 220, 220, 90, 200, 95, 110, 230, 150, 150, 100];
   widths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
 
   sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(6); // keep Timestamp…Barcode visible when scrolling right
+  sheet.setFrozenColumns(5); // keep Timestamp…Barcode visible when scrolling right
   sheet.setRowHeight(1, 36);
 
   sheet.getRange(1, 1, 1, HEADERS.length)
@@ -243,16 +241,16 @@ function checkDuplicate_(sheet, barcode) {
 
 function colorRowByPlatform_(sheet, row, platform) {
   const color = PLATFORM_COLORS[platform.toLowerCase()];
-  if (color) sheet.getRange(row, 1, 1, 6).setBackground(color);
+  if (color) sheet.getRange(row, 1, 1, COL.BARCODE).setBackground(color); // tint A..Barcode
 }
 
 function addDropdowns_(sheet) {
   const set = (col, values) => sheet.getRange(2, col, 5000, 1).setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInList(values, true).build()
   );
-  set(3,  ['amazon', 'noon', 'al_nasser', 'jumia']);   // C Platform
-  set(COL.STATUS, ['confirmed', 'needs_review']);      // T Status
-  set(COL.LISTING, ['Not Listed', 'Listed', 'Live']);  // Y Listing Status
+  set(3,  ['amazon', 'noon', 'al_nasser', 'jumia']);            // C Ecommerce
+  set(COL.STATUS, ['pending', 'confirmed', 'needs_review']);    // S Status
+  set(COL.LISTING, ['Not Listed', 'Listed', 'Live']);          // X Listing Status
 }
 
 function buildDashboard_(ss) {
@@ -265,7 +263,7 @@ function buildDashboard_(ss) {
     ['Joub Listing App — Dashboard', ''],
     ['', ''],
     ['── Totals ──', ''],
-    ['All captures',  `=COUNTA(${C}!F2:F)`],
+    ['All captures',  `=COUNTA(${C}!E2:E)`],
     ['Today',         `=COUNTIF(${C}!B2:B,TEXT(TODAY(),"YYYY-MM-DD"))`],
     ['', ''],
     ['── By Ecommerce ──', ''],
@@ -274,19 +272,20 @@ function buildDashboard_(ss) {
     ['Al-Nasser',     `=COUNTIF(${C}!C2:C,"al_nasser")`],
     ['Jumia',         `=COUNTIF(${C}!C2:C,"jumia")`],
     ['', ''],
-    ['── Review Queue ──', ''],
-    ['Needs Review',  `=COUNTIF(${C}!T2:T,"needs_review")`],
-    ['Confirmed',     `=COUNTIF(${C}!T2:T,"confirmed")`],
-    ['Duplicates',    `=COUNTIF(${C}!G2:G,"⚠️ DUPLICATE")`],
+    ['── AI Queue ──', ''],
+    ['Pending (AI)',  `=COUNTIF(${C}!S2:S,"pending")`],
+    ['Needs Review',  `=COUNTIF(${C}!S2:S,"needs_review")`],
+    ['Confirmed',     `=COUNTIF(${C}!S2:S,"confirmed")`],
+    ['Duplicates',    `=COUNTIF(${C}!F2:F,"⚠️ DUPLICATE")`],
     ['', ''],
     ['── Image Editing ──', ''],
-    ['Edited done',   `=COUNTIF(${C}!W2:W,"<>")`],
-    ['Awaiting edit', `=COUNTA(${C}!V2:V)-COUNTIF(${C}!W2:W,"<>")`],
+    ['Edited done',   `=COUNTIF(${C}!V2:V,"<>")`],
+    ['Awaiting edit', `=COUNTA(${C}!U2:U)-COUNTIF(${C}!V2:V,"<>")`],
     ['', ''],
     ['── Listing Progress ──', ''],
-    ['Not Listed',    `=COUNTIF(${C}!Y2:Y,"Not Listed")`],
-    ['Listed',        `=COUNTIF(${C}!Y2:Y,"Listed")`],
-    ['Live',          `=COUNTIF(${C}!Y2:Y,"Live")`],
+    ['Not Listed',    `=COUNTIF(${C}!X2:X,"Not Listed")`],
+    ['Listed',        `=COUNTIF(${C}!X2:X,"Listed")`],
+    ['Live',          `=COUNTIF(${C}!X2:X,"Live")`],
     ['', ''],
     ['Last refreshed', `=NOW()`]
   ];
@@ -295,7 +294,13 @@ function buildDashboard_(ss) {
   dash.getRange('A1').setFontSize(16).setFontWeight('bold').setFontColor('#e2e8f0');
   dash.setColumnWidth(1, 170);
   dash.setColumnWidth(2, 110);
-  [3, 7, 13, 18, 22].forEach(r => dash.getRange(r, 1).setFontWeight('bold').setFontColor('#6366f1'));
+  [3, 7, 13, 19, 23].forEach(r => dash.getRange(r, 1).setFontWeight('bold').setFontColor('#6366f1'));
+}
+
+function colLetter_(n) {
+  let s = '';
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
 }
 
 function json_(obj) {
@@ -381,11 +386,11 @@ function classifyPending() {
     try {
       const s = classifyImage_(imageUrl, apiKey);
 
-      // Section..Size (cols 8–12)
+      // Section..Size (cols 7–11)
       sheet.getRange(row, COL.SECTION, 1, 5).setValues([[
         s.section || '', s.category || '', s.sub_category || '', s.product || '', s.size || ''
       ]]);
-      // Color..Notes (cols 14–19) — Price (13) is left for the owner
+      // Color..Notes (cols 13–18) — Price (12) is left for the owner
       sheet.getRange(row, COL.COLOR, 1, 6).setValues([[
         s.color || '', s.brand || '', s.description_ar || '', s.description_en || '',
         (s.confidence != null ? s.confidence : ''), s.notes || ''

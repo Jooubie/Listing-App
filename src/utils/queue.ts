@@ -10,7 +10,6 @@ export interface QueuedItem {
   barcode: string;
   imageBlob: Blob;
   photographer_id: string;
-  factory_location: string;
   created_at: string;
 }
 
@@ -39,7 +38,6 @@ export async function enqueueCapture(item: {
   barcode: string;
   imageBlob: Blob;
   photographer_id: string;
-  factory_location: string;
 }): Promise<QueuedItem> {
   const db = await getDB();
   const queuedItem: QueuedItem = {
@@ -100,7 +98,6 @@ export async function syncOfflineQueue(
           platform: item.platform,
           barcode: item.barcode,
           photographerId: item.photographer_id,
-          factoryLocation: item.factory_location || '',
           // AI fields intentionally empty — filled server-side by the Apps Script
           section: '',
           category: '',

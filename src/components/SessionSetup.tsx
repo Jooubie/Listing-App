@@ -1,14 +1,11 @@
 import React, { useState } from 'react';
-import { Camera, User, Globe, MapPin } from 'lucide-react';
+import { Camera, User, Globe } from 'lucide-react';
 
 interface SessionSetupProps {
-  onComplete: (photographerId: string, platform: string, factoryLocation: string) => void;
+  onComplete: (photographerId: string, platform: string) => void;
   initialPhotographerId?: string;
   initialPlatform?: string;
-  initialFactoryLocation?: string;
 }
-
-const FACTORIES = ['Factory A', 'Factory B', 'Factory C', 'Warehouse 1', 'Warehouse 2', 'Other'];
 
 const PLATFORMS = [
   { id: 'amazon', name: 'Amazon', color: 'border-amber-500/30 text-amber-400 bg-amber-950/20 hover:bg-amber-500/20 active:bg-amber-500/30' },
@@ -20,21 +17,19 @@ const PLATFORMS = [
 export const SessionSetup: React.FC<SessionSetupProps> = ({
   onComplete,
   initialPhotographerId = '',
-  initialPlatform = '',
-  initialFactoryLocation = ''
+  initialPlatform = ''
 }) => {
   const [photographerId, setPhotographerId] = useState(initialPhotographerId);
   const [platform, setPlatform] = useState(initialPlatform);
-  const [factoryLocation, setFactoryLocation] = useState(initialFactoryLocation);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (photographerId.trim() && platform && factoryLocation.trim()) {
-      onComplete(photographerId.trim(), platform, factoryLocation.trim());
+    if (photographerId.trim() && platform) {
+      onComplete(photographerId.trim(), platform);
     }
   };
 
-  const isFormValid = photographerId.trim() && platform && factoryLocation.trim();
+  const isFormValid = photographerId.trim() && platform;
 
   return (
     <div className="flex flex-col items-center justify-center min-h-full w-full p-6 bg-slate-950 text-slate-100">
@@ -68,37 +63,6 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
               value={photographerId}
               onChange={(e) => setPhotographerId(e.target.value)}
               className="w-full px-4 py-3 bg-slate-900 border border-slate-700/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-white placeholder-slate-500 transition-all font-medium"
-            />
-          </div>
-
-          {/* Factory / Location */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm font-semibold text-slate-300">
-              <MapPin className="w-4 h-4 text-indigo-400" />
-              Factory / Location
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {FACTORIES.map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setFactoryLocation(f)}
-                  className={`py-2 px-2 border rounded-xl text-xs font-bold transition-all ${
-                    factoryLocation === f
-                      ? 'border-indigo-500 text-indigo-300 bg-indigo-950/50 ring-1 ring-indigo-500'
-                      : 'border-slate-800 text-slate-400 bg-slate-900/50 hover:border-slate-600'
-                  }`}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-            <input
-              type="text"
-              placeholder="Or type a custom location..."
-              value={FACTORIES.includes(factoryLocation) ? '' : factoryLocation}
-              onChange={(e) => setFactoryLocation(e.target.value)}
-              className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-white placeholder-slate-600 text-sm font-medium"
             />
           </div>
 
