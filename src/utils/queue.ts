@@ -111,7 +111,7 @@ export async function syncOfflineQueue(
           descriptionEn: '',
           notes: '',
           confidence: 0,
-          imageBlob: item.imageBlob,
+          imageBlob: item.imageBlob ?? undefined,
           status: 'pending',
         });
 

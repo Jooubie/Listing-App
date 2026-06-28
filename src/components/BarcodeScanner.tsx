@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { DecodeHintType, BarcodeFormat } from '@zxing/library';
-import { Barcode, AlertCircle, RefreshCw, Keyboard, Wifi, WifiOff, Package, X, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, RefreshCw, Keyboard, Wifi, WifiOff, X, CheckCircle2 } from 'lucide-react';
 
 interface BarcodeScannerProps {
   platform: string;
