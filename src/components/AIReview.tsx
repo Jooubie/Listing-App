@@ -13,11 +13,16 @@ interface AIReviewProps {
 }
 
 export interface ReviewData {
+  section: string;
   category: string;
   subCategory: string;
   productType: string;
   productName: string;
   brand: string;
+  size: string;
+  color: string;
+  descriptionAr: string;
+  descriptionEn: string;
   notes: string;
   confidence: number;
   imageBlob: Blob;
@@ -44,7 +49,13 @@ export const AIReview: React.FC<AIReviewProps> = ({
   const [productType, setProductType] = useState('');
   const [productName, setProductName] = useState('');
   const [brand, setBrand] = useState('');
+  const [size, setSize] = useState('');
+  const [color, setColor] = useState('');
   const [notes, setNotes] = useState('');
+  // Carried from Gemini (not edited on mobile, but must reach the sheet)
+  const [section, setSection] = useState('');
+  const [descriptionAr, setDescriptionAr] = useState('');
+  const [descriptionEn, setDescriptionEn] = useState('');
 
   // Derived dropdown options
   const categories = getCategories();
@@ -64,11 +75,16 @@ export const AIReview: React.FC<AIReviewProps> = ({
     setErrorMsg('');
     try {
       const suggestion = await analyzeProductImage(imageBlob);
+      setSection(suggestion.section);
       setCategory(suggestion.category);
       setSubCategory(suggestion.sub_category);
       setProductType(suggestion.product);
       setProductName(suggestion.product);
       setBrand(suggestion.brand);
+      setSize(suggestion.size);
+      setColor(suggestion.color);
+      setDescriptionAr(suggestion.description_ar);
+      setDescriptionEn(suggestion.description_en);
       setNotes(suggestion.notes);
       setAiConfidence(suggestion.confidence);
       setStage('review');
@@ -98,11 +114,16 @@ export const AIReview: React.FC<AIReviewProps> = ({
   const handleConfirm = () => {
     if (!category || !subCategory || !productType || !productName.trim()) return;
     onConfirm({
+      section,
       category,
       subCategory,
       productType,
       productName: productName.trim(),
       brand: brand.trim(),
+      size: size.trim(),
+      color: color.trim(),
+      descriptionAr,
+      descriptionEn,
       notes: notes.trim(),
       confidence: aiConfidence,
       imageBlob
@@ -272,6 +293,40 @@ export const AIReview: React.FC<AIReviewProps> = ({
                   className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700/60 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
               </FormField>
+
+              {/* Size + Color (side by side) */}
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Size">
+                  <input
+                    type="text"
+                    value={size}
+                    onChange={e => setSize(e.target.value)}
+                    placeholder="e.g. L, 42"
+                    className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700/60 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                </FormField>
+                <FormField label="Color">
+                  <input
+                    type="text"
+                    value={color}
+                    onChange={e => setColor(e.target.value)}
+                    placeholder="e.g. Wht-Blk"
+                    className="w-full px-3 py-2.5 bg-slate-900 border border-slate-700/60 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                </FormField>
+              </div>
+
+              {/* AI-generated descriptions (read-only preview, sent to sheet) */}
+              {(descriptionEn || descriptionAr) && (
+                <div className="mb-3 rounded-xl border border-slate-800/60 bg-slate-900/40 p-3 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3 text-indigo-400" />
+                    <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">AI Descriptions</span>
+                  </div>
+                  {descriptionEn && <p className="text-[11px] text-slate-400 leading-snug">{descriptionEn}</p>}
+                  {descriptionAr && <p dir="rtl" className="text-[11px] text-slate-400 leading-snug">{descriptionAr}</p>}
+                </div>
+              )}
 
               {/* Notes */}
               <FormField label="Notes">

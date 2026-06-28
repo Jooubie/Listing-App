@@ -11,6 +11,7 @@ export interface CaptureRow {
   platform: string;
   barcode: string;
   photographerId: string;
+  factoryLocation: string;
   section: string;
   category: string;
   subCategory: string;
@@ -52,6 +53,7 @@ export async function writeRowToSheet(row: CaptureRow): Promise<SheetWriteRespon
     platform: row.platform,
     barcode: row.barcode,
     photographerId: row.photographerId,
+    factoryLocation: row.factoryLocation,
     section: row.section,
     category: row.category,
     subCategory: row.subCategory,
@@ -62,6 +64,8 @@ export async function writeRowToSheet(row: CaptureRow): Promise<SheetWriteRespon
     brand: row.brand,
     descriptionAr: row.descriptionAr,
     descriptionEn: row.descriptionEn,
+    confidence: row.confidence,
+    notes: row.notes,
     status: row.status ?? 'confirmed',
     imageBase64
   };

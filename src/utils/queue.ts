@@ -10,12 +10,18 @@ export interface QueuedItem {
   barcode: string;
   imageBlob: Blob;
   photographer_id: string;
+  factory_location: string;
   created_at: string;
+  section?: string;
   category?: string;
   subCategory?: string;
   productType?: string;
   productName?: string;
   brand?: string;
+  size?: string;
+  color?: string;
+  descriptionAr?: string;
+  descriptionEn?: string;
   notes?: string;
   confidence?: number;
 }
@@ -45,11 +51,17 @@ export async function enqueueCapture(item: {
   barcode: string;
   imageBlob: Blob;
   photographer_id: string;
+  factory_location: string;
+  section?: string;
   category?: string;
   subCategory?: string;
   productType?: string;
   productName?: string;
   brand?: string;
+  size?: string;
+  color?: string;
+  descriptionAr?: string;
+  descriptionEn?: string;
   notes?: string;
   confidence?: number;
 }): Promise<QueuedItem> {
@@ -107,19 +119,20 @@ export async function syncOfflineQueue(
       onProgress?.({ syncedCount, totalCount, currentItem: item });
 
       try {
-        let section = '';
+        let section = item.section || '';
         let category = item.category || '';
         let subCategory = item.subCategory || '';
-        let product = item.productType || '';
-        let size = '';
-        let color = '';
-        let descriptionAr = '';
-        let descriptionEn = '';
+        let product = item.productType || item.productName || '';
+        let size = item.size || '';
+        let color = item.color || '';
+        let descriptionAr = item.descriptionAr || '';
+        let descriptionEn = item.descriptionEn || '';
         let brand = item.brand || '';
         let confidence = item.confidence || 0;
         let notes = item.notes || '';
 
-        // If the item doesn't have reviewed details, run Gemini analysis
+        // If the item doesn't have reviewed details (e.g. Quick Capture mode),
+        // run Gemini analysis now during background sync.
         if (!category) {
           try {
             const suggestion = await analyzeProductImage(item.imageBlob);
@@ -139,17 +152,20 @@ export async function syncOfflineQueue(
           }
         }
 
-        // Look up section from taxonomy
-        section = TAXONOMY.find(t => t.category === category)?.section || 'Other';
+        // Fill section from taxonomy if not already set
+        if (!section) {
+          section = TAXONOMY.find(t => t.category === category)?.section || 'Other';
+        }
 
         await writeRowToSheet({
           platform: item.platform,
           barcode: item.barcode,
           photographerId: item.photographer_id,
+          factoryLocation: item.factory_location || '',
           section,
           category,
           subCategory,
-          product: product || item.productName || `Product ${item.barcode}`,
+          product: product || `Product ${item.barcode}`,
           size,
           price: '',
           color,

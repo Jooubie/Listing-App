@@ -27,6 +27,9 @@ export default function App() {
   const [platform, setPlatform] = useState<string>(() =>
     localStorage.getItem('joubie_platform') || ''
   );
+  const [factoryLocation, setFactoryLocation] = useState<string>(() =>
+    localStorage.getItem('joubie_factory_location') || ''
+  );
   const [sessionCount, setSessionCount] = useState<number>(() => {
     const saved = localStorage.getItem('joubie_session_count');
     return saved ? parseInt(saved, 10) : 0;
@@ -104,11 +107,13 @@ export default function App() {
     }
   };
 
-  const handleSessionComplete = (id: string, plat: string) => {
+  const handleSessionComplete = (id: string, plat: string, factory: string) => {
     setPhotographerId(id);
     setPlatform(plat);
+    setFactoryLocation(factory);
     localStorage.setItem('joubie_photographer_id', id);
     localStorage.setItem('joubie_platform', plat);
+    localStorage.setItem('joubie_factory_location', factory);
     setActiveScreen('scan');
   };
 
@@ -130,6 +135,7 @@ export default function App() {
           barcode: activeBarcode,
           imageBlob: compressed,
           photographer_id: photographerId,
+          factory_location: factoryLocation,
         });
 
         const size = await getQueueSize();
@@ -164,11 +170,17 @@ export default function App() {
         barcode: activeBarcode,
         imageBlob: data.imageBlob,
         photographer_id: photographerId,
+        factory_location: factoryLocation,
+        section: data.section,
         category: data.category,
         subCategory: data.subCategory,
         productType: data.productType,
         productName: data.productName,
         brand: data.brand,
+        size: data.size,
+        color: data.color,
+        descriptionAr: data.descriptionAr,
+        descriptionEn: data.descriptionEn,
         notes: data.notes,
         confidence: data.confidence
       });
@@ -215,6 +227,7 @@ export default function App() {
             onComplete={handleSessionComplete}
             initialPhotographerId={photographerId}
             initialPlatform={platform}
+            initialFactoryLocation={factoryLocation}
           />
         </Suspense>
       )}

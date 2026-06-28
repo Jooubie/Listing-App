@@ -123,11 +123,16 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       ? { deviceId: { exact: selectedCameraId } }
       : { facingMode: { ideal: 'environment' } };
 
-    // Request continuous autofocus if supported by the browser/device
-    (videoConstraints as any).advanced = [
-      { focusMode: 'continuous' },
-      { autoFocus: true }
-    ];
+    // Request a HIGH-RESOLUTION feed. This is the key fix for "camera shows but
+    // won't decode": mobile browsers default to ~640x480, which is too coarse to
+    // resolve the thin bars of an EAN-13/UPC barcode. Asking for 1080p gives ZXing
+    // enough pixels to decode; the browser automatically caps to the device maximum.
+    videoConstraints.width = { ideal: 1920 };
+    videoConstraints.height = { ideal: 1080 };
+
+    // Best-effort continuous autofocus (silently ignored where unsupported).
+    // NOTE: 'autoFocus' is not a valid MediaTrackConstraint — only 'focusMode' is.
+    (videoConstraints as any).advanced = [{ focusMode: 'continuous' }];
 
     codeReader
       .decodeFromConstraints({ video: videoConstraints }, videoRef.current, (result, err) => {
@@ -156,6 +161,16 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           return;
         }
         controlsRef.current = controls;
+
+        // Re-apply continuous focus on the live track. Some Android devices ignore
+        // focusMode in the initial getUserMedia but honor it via applyConstraints.
+        const stream = videoRef.current?.srcObject as MediaStream | null;
+        const track = stream?.getVideoTracks?.()[0];
+        if (track && typeof track.applyConstraints === 'function') {
+          track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as any] }).catch(() => {
+            /* device doesn't support manual focus control — ignore */
+          });
+        }
 
         // Enumerate cameras AFTER the stream is live so labels are populated
         navigator.mediaDevices.enumerateDevices().then((devices) => {
