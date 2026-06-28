@@ -72,7 +72,8 @@ const COL = {
 };
 
 // ── AI classification config ───────────────────────────────
-const GEMINI_MODEL                = 'gemini-1.5-flash';
+// Key is NOT stored here — set it once via setApiKey('...') (Script Properties).
+const GEMINI_MODEL                = 'gemini-2.0-flash'; // fast + cheap, ideal for image→taxonomy
 const CLASSIFY_BATCH_LIMIT        = 40;   // rows per run; ~3s each → ~2min, well under the 6-min cap
 const CONFIDENCE_REVIEW_THRESHOLD = 0.6;  // below this → needs_review
 const TRIGGER_EVERY_MINUTES       = 1;    // Apps Script minimum; 40 rows/min ≈ 2400/hr ceiling
