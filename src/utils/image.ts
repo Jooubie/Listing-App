@@ -2,7 +2,7 @@
  * Utility to resize and compress images client-side before upload.
  * Resolves to a JPEG Blob at the specified quality, capped at maxEdge on its longest side.
  */
-export function resizeImage(file: File | Blob, maxEdge = 1600, quality = 0.8): Promise<Blob> {
+export function resizeImage(file: File | Blob, maxEdge = 1200, quality = 0.8): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const objectUrl = URL.createObjectURL(file);
