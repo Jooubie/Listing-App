@@ -106,8 +106,13 @@ export const SessionSetup: React.FC<SessionSetupProps> = ({
       </form>
 
       {/* Footer metadata */}
-      <div className="mt-8 text-xs text-slate-500 font-medium">
-        Joub Logistics &copy; {new Date().getFullYear()}
+      <div className="mt-8 text-center">
+        <div className="text-xs text-slate-500 font-medium">
+          Joub Logistics &copy; {new Date().getFullYear()}
+        </div>
+        <div className="text-[9px] text-slate-600 font-mono mt-1">
+          Build {__APP_BUILD_TIME__}
+        </div>
       </div>
     </div>
   );

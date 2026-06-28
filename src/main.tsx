@@ -8,7 +8,9 @@ import { registerSW } from 'virtual:pwa-register'
 if ('serviceWorker' in navigator) {
   registerSW({
     onNeedRefresh() {
-      console.log('[PWA] New content is available; please refresh.');
+      console.log('[PWA] New content available — forcing update.');
+      // Auto-reload so mobile users always get the latest version immediately
+      window.location.reload();
     },
     onOfflineReady() {
       console.log('[PWA] App is ready for offline usage.');

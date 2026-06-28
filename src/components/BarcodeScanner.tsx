@@ -101,24 +101,19 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     isStoppedRef.current = false;
     setErrorMsg(null);
 
-    // Optimize ZXing decoder by specifying expected formats and setting TRY_HARDER
+    // Optimize ZXing decoder for mobile: limit formats + do NOT use TRY_HARDER
+    // (TRY_HARDER is too slow per-frame on phones → missed detections in motion)
     const hints = new Map<DecodeHintType, any>();
     const formats = [
       BarcodeFormat.EAN_13,
       BarcodeFormat.EAN_8,
-      BarcodeFormat.CODE_128,
-      BarcodeFormat.CODE_39,
-      BarcodeFormat.CODE_93,
-      BarcodeFormat.CODABAR,
-      BarcodeFormat.ITF,
       BarcodeFormat.UPC_A,
       BarcodeFormat.UPC_E,
-      BarcodeFormat.QR_CODE,
-      BarcodeFormat.PDF_417,
-      BarcodeFormat.DATA_MATRIX
+      BarcodeFormat.CODE_128,
+      BarcodeFormat.CODE_39,
+      BarcodeFormat.QR_CODE
     ];
     hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
-    hints.set(DecodeHintType.TRY_HARDER, true);
 
     const codeReader = new BrowserMultiFormatReader(hints);
 
@@ -213,7 +208,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     <div className="relative flex flex-col justify-between w-full h-full bg-slate-950 text-white overflow-hidden">
 
       {/* Top Banner Status Bar */}
-      <div className="z-10 w-full px-4 py-3 glass flex items-center justify-between" style={{ paddingTop: 'calc(12px + env(safe-area-inset-top))' }}>
+      <div className="z-10 w-full px-4 py-3 glass shrink-0 flex items-center justify-between" style={{ paddingTop: 'calc(12px + env(safe-area-inset-top))' }}>
         <div className="flex flex-col">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Platform</span>
           <span className="text-sm font-extrabold text-white">{getPlatformLabel(platform)}</span>
@@ -310,7 +305,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       </div>
 
       {/* Bottom Controls Panel */}
-      <div className="z-10 w-full px-4 pt-4 pb-3 glass flex flex-col gap-3 items-center" style={{ paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
+      <div className="z-10 w-full px-4 pt-4 pb-3 glass shrink-0 flex flex-col gap-3 items-center" style={{ paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
         {cameras.length > 1 && (
           <div className="w-full flex items-center gap-2">
             <span className="text-xs font-semibold text-slate-400 shrink-0">Camera:</span>

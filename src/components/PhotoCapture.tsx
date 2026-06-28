@@ -191,7 +191,7 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
     <div className="relative flex flex-col justify-between w-full h-full bg-slate-950 text-white overflow-hidden animate-fade-in">
       
       {/* Top Banner Status Bar */}
-      <div className="z-10 w-full px-4 py-3 glass flex items-center justify-between" style={{ paddingTop: 'calc(12px + env(safe-area-inset-top))' }}>
+      <div className="z-10 w-full px-4 py-3 glass shrink-0 flex items-center justify-between" style={{ paddingTop: 'calc(12px + env(safe-area-inset-top))' }}>
         <button
           onClick={onBack}
           className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white cursor-pointer py-1 px-2 hover:bg-slate-800 rounded-lg transition-colors"
@@ -266,7 +266,7 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
       </div>
 
       {/* Bottom Panel Actions */}
-      <div className="z-10 w-full px-4 pt-4 pb-3 glass flex flex-col items-center gap-3" style={{ paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
+      <div className="z-10 w-full px-4 pt-4 pb-3 glass shrink-0 flex flex-col items-center gap-3" style={{ paddingBottom: 'calc(12px + env(safe-area-inset-bottom))' }}>
         
         {/* Shutter Button (Capture state) */}
         {!previewUrl && (
