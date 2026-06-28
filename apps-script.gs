@@ -37,7 +37,7 @@ const DASHBOARD_TAB = 'Dashboard';
 const HEADERS = [
   'Timestamp',          // A
   'Date',               // B  (formula)
-  'Platform',           // C
+  'Ecommerce',          // C  (platform: amazon / noon / al_nasser / jumia)
   'Photographer',       // D
   'Factory',            // E
   'Barcode',            // F
@@ -255,7 +255,7 @@ function buildDashboard_(ss) {
     ['All captures',  `=COUNTA(${C}!F2:F)`],
     ['Today',         `=COUNTIF(${C}!B2:B,TEXT(TODAY(),"YYYY-MM-DD"))`],
     ['', ''],
-    ['── By Platform ──', ''],
+    ['── By Ecommerce ──', ''],
     ['Amazon',        `=COUNTIF(${C}!C2:C,"amazon")`],
     ['Noon',          `=COUNTIF(${C}!C2:C,"noon")`],
     ['Al-Nasser',     `=COUNTIF(${C}!C2:C,"al_nasser")`],
