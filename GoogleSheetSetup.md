@@ -1,168 +1,132 @@
-# Google Sheet Setup Guide
+# Google Sheet + Apps Script Setup
 
-This document covers:
+This is the backend for the Joub capture PWA: the app POSTs each scan to a Google
+Apps Script web app, which **hosts the photo on Drive, writes a row to the
+`Captures` sheet, and classifies the product with AI server-side**.
 
-1. The required sheet column structure
-2. The Google Apps Script code (the write proxy)
-3. How to deploy and get your `VITE_APPS_SCRIPT_URL`
-
----
-
-## 1. Sheet Structure
-
-Create a Google Sheet and name the first tab **`Captures`**.
-
-Set up these columns in row 1 (exact order matters for the Apps Script):
-
-| Col | Header        | Type          | Source                                   |
-| --- | ------------- | ------------- | ---------------------------------------- |
-| A   | Timestamp     | DateTime      | Auto (Apps Script)                       |
-| B   | Platform      | Text          | App (amazon/noon/al_nasser/jumia)        |
-| C   | Photographer  | Text          | App                                      |
-| D   | Barcode       | Text          | App (camera scan)                        |
-| E   | Category      | Text          | Future AI / manual review                 |
-| F   | Sub-Category  | Text          | Future AI / manual review                 |
-| G   | Product Type  | Text          | Future AI / manual review                 |
-| H   | Product Name  | Text          | Future AI / manual review                 |
-| I   | Brand         | Text          | Future AI / manual review                 |
-| J   | AI Confidence | Number (0–1) | Future AI classifier                      |
-| K   | Notes         | Text          | Photographer                             |
-| L   | Image URL     | URL           | Apps Script → Google Drive              |
-| M   | Status        | Text          | `confirmed` or `needs_review`        |
-
-### Recommended Sheet Formatting
-
-- **Freeze row 1** (View → Freeze → 1 row)
-- Format column A as `Date time`
-- Format column J as `Percent` (multiply by 100)
-- Add a filter to column M so Amr can quickly view `needs_review` items
-
-### Data Validation Dropdowns (Optional but recommended)
-
-Add dropdown validation to the following columns so Amr can correct values directly in the sheet:
-
-- **Column B (Platform):** `amazon, noon, al_nasser, jumia`
-- **Column E (Category):** Your category list
-- **Column M (Status):** `confirmed, needs_review, done`
+The script is the source of truth for the sheet layout — you do **not** build
+columns by hand. Running `setup()` once creates the `Captures` + `Dashboard`
+tabs, all 24 columns, dropdowns, formatting, and the AI trigger.
 
 ---
 
-## 2. Google Drive Folder for Images
+## 1. Files
 
-1. Create a folder in Google Drive called **`Listing App Images`** (or any name).
-2. Copy the folder ID from the URL:
-   `https://drive.google.com/drive/folders/`**`THIS_PART_IS_THE_ID`**
-3. You'll paste this ID into the Apps Script below.
+| File | Role |
+| --- | --- |
+| `gas/Code.js` | The script that is actually deployed (pushed via clasp). |
+| `apps-script.gs` | Readable mirror of the same code (keep both in sync). |
+
+The script reads its keys from **Script Properties**, never from the code or the
+app bundle. No secrets live in this repo.
 
 ---
 
-## 3. Apps Script Code
+## 2. Sheet columns (auto-created by `setup()`)
 
-1. Open your Google Sheet
-2. Go to **Extensions → Apps Script**
-3. Delete the default code and paste the code below
-4. Replace the two constants at the top with your real values
+The `Captures` tab is columns **A–X**. The app fills capture data + image; the
+AI trigger fills the classification fields; the owner/team fill price, edited
+images, and listing status.
+
+| Col | Header | Filled by |
+| --- | --- | --- |
+| A | Timestamp | App |
+| B | Date | Formula |
+| C | Ecommerce | App (amazon / noon / al_nasser / jumia) |
+| D | Photographer | App |
+| E | Barcode | App |
+| F | Duplicate? | Formula |
+| G | Section | AI |
+| H | Category | AI |
+| I | Sub-Category | AI |
+| J | Product | AI |
+| K | Size | AI |
+| L | Price | Owner |
+| M | Color | AI |
+| N | Brand | AI |
+| O | Description (AR) | AI |
+| P | Description (EN) | AI |
+| Q | AI Confidence | AI |
+| R | Notes | AI / photographer |
+| S | Status | `pending` → `confirmed` / `needs_review` |
+| T | Original Image | `=IMAGE(...)` preview (app) |
+| U | Original Image URL | Direct `/view` link (app) |
+| V | Edited Image 1 | Team |
+| W | Edited Image 2 | Team |
+| X | Listing Status | Team (`Not Listed` / `Listed` / `Live`) |
+
+**Image hosting note:** photos go to a Drive folder shared *anyone-with-link*.
+Column **T** uses Drive's `thumbnail?id=…` endpoint (the only Drive URL that
+still renders inside `=IMAGE()`), and column **U** is the clickable
+`…/file/d/<id>/view` link. The old `uc?id=` format is deprecated by Google and
+no longer renders — do not reintroduce it.
+
+---
+
+## 3. Configure the script
+
+In `gas/Code.js` / `apps-script.gs`, set the two IDs at the top:
 
 ```javascript
-// ── CONFIGURE THESE TWO VALUES ──────────────────────────────────────────────
-const SPREADSHEET_ID = 'YOUR_GOOGLE_SHEET_ID';   // from the sheet URL
-const DRIVE_FOLDER_ID = 'YOUR_DRIVE_FOLDER_ID';  // folder for product images
-// ────────────────────────────────────────────────────────────────────────────
-
-function doPost(e) {
-  try {
-    const data = JSON.parse(e.postData.contents);
-
-    // Save image to Google Drive and get a shareable link
-    let imageUrl = '';
-    if (data.imageBase64) {
-      const bytes = Utilities.base64Decode(data.imageBase64);
-      const fileName = `${data.barcode || 'product'}_${Date.now()}.jpg`;
-      const blob = Utilities.newBlob(bytes, 'image/jpeg', fileName);
-      const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
-      const file = folder.createFile(blob);
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      // Convert to a direct viewable URL
-      imageUrl = `https://drive.google.com/uc?id=${file.getId()}`;
-    }
-
-    // Write row to the Captures sheet
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName('Captures');
-
-    sheet.appendRow([
-      new Date(data.timestamp),   // A: Timestamp
-      data.platform,              // B: Platform
-      data.photographerId,        // C: Photographer
-      data.barcode,               // D: Barcode
-      data.category,              // E: Category
-      data.subCategory,           // F: Sub-Category
-      data.productType,           // G: Product Type
-      data.productName,           // H: Product Name
-      data.brand,                 // I: Brand
-      data.confidence,            // J: AI Confidence
-      data.notes,                 // K: Notes
-      imageUrl,                   // L: Image URL
-      data.status                 // M: Status
-    ]);
-
-    return ContentService
-      .createTextOutput(JSON.stringify({ success: true, imageUrl }))
-      .setMimeType(ContentService.MimeType.JSON);
-
-  } catch (err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ success: false, error: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-// Health check — GET request to verify the script is live
-function doGet() {
-  return ContentService
-    .createTextOutput(JSON.stringify({ status: 'ok', message: 'Listing App Script is running' }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+const SPREADSHEET_ID  = '...';   // from the sheet URL
+const DRIVE_FOLDER_ID = '...';   // Drive folder for product images
 ```
 
----
+AI provider is selected by `AI_PROVIDER` (`'openrouter'` or `'gemini'`).
 
-## 4. Deploy the Script as a Web App
+Add the matching key in **Project Settings → Script Properties**:
 
-1. In the Apps Script editor, click **Deploy → New deployment**
-2. Click the gear icon next to "Select type" → choose **Web app**
-3. Set:
-   - **Description:** Listing App Write Proxy
-   - **Execute as:** Me
-   - **Who has access:** Anyone
-4. Click **Deploy**
-5. Copy the **Web app URL** — it looks like:
-   `https://script.google.com/macros/s/AKfycb.../exec`
-6. Paste this URL as `VITE_APPS_SCRIPT_URL` in your `.env` file
+- `OPENROUTER_API_KEY` — when `AI_PROVIDER = 'openrouter'`
+- `GEMINI_API_KEY` — when `AI_PROVIDER = 'gemini'`
 
-> **Every time you edit the Apps Script**, you must create a **new deployment** or use **Manage Deployments → Edit** to update the existing one. Otherwise the old code stays live.
+(Or run `setOpenRouterKey('...')` / `setApiKey('...')` once from the editor.)
 
 ---
 
-## 5. Environment File
+## 4. Deploy
 
-Copy `.env.example` to `.env` and fill in your values:
+Preferred (this repo is already linked — see the clasp memory/notes):
 
 ```bash
-VITE_GEMINI_API_KEY=your_gemini_api_key_here
-VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec
+npx @google/clasp push --force
+npx @google/clasp deploy -i <DEPLOYMENT_ID> -d "describe change"
+```
+
+Deploying **to the existing deployment id** keeps the same `/exec` URL, so the
+frontend `VITE_APPS_SCRIPT_URL` stays valid. A bare `clasp deploy` creates a new
+URL and breaks the app.
+
+Manual alternative: **Extensions → Apps Script**, paste `apps-script.gs`,
+**Deploy → Manage deployments → Edit → New version**.
+
+After deploying the first time, run `setup()` once from the editor to build the
+tabs, dropdowns, and AI trigger.
+
+---
+
+## 5. Frontend env
+
+`.env` (never committed) needs:
+
+```bash
+VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec
 VITE_MOCK_MODE=false
 ```
 
-Get your Gemini API key from: https://aistudio.google.com/app/apikey
-Only add it if you later wire in the AI classification phase.
+There is **no** AI key in the frontend — classification is server-side.
 
 ---
 
-## 6. Taxonomy Updates
+## 6. Health check
 
-The category/sub-category/product type dropdowns in the app are defined in:
-`src/data/taxonomy.ts`
+- `GET <exec-url>` → `{ success, status, totalCaptures, ... }`
+- `GET <exec-url>?action=peek&n=3` → summary of the last N rows (barcode,
+  status, category, image URL) for quick monitoring.
 
-When Amr provides his actual category structure, edit that file.
-The taxonomy file drives downstream validation and any future AI prompt or review screen.
+---
+
+## 7. Taxonomy
+
+The closed taxonomy the AI must classify into lives in `src/data/taxonomy.ts`
+and is mirrored as `TAXONOMY_TEXT` in the script. Keep the two in sync when the
+category structure changes.

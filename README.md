@@ -53,10 +53,11 @@ Photographers often scan in warehouses with unstable Wi-Fi. The application impl
 
 ## Project Notes
 
-* `src/utils/supabase.ts` is currently unused in the running app and should be treated as legacy or future work.
-* The current frontend does not implement on-device AI classification or a review/confirm screen yet.
-* The operator flow now includes a compact live dashboard with scanned, done, and queued counts plus a manual batch sync action.
-* The intended production loop is: scan barcode, capture one clean product photo, keep moving, then sync the batch while the sheet and AI finish the listing data.
+* Supabase has been removed — the only backend is the Google Apps Script web app (see `GoogleSheetSetup.md`).
+* AI classification is **server-side** by design: the phone uploads raw captures as `pending`; an Apps Script timed trigger classifies each row with OpenRouter/Gemini and flips the status. No AI key ships in the app bundle, and there is intentionally no on-device review/confirm screen — the owner revises in the Sheet.
+* Photos are hosted on Google Drive; the sheet stores a `thumbnail` preview (`=IMAGE`) and a direct `/view` link per row. On upload failure the app retries the image at smaller sizes before, as a last resort, saving the row without an image.
+* The operator flow includes a compact live dashboard with captured, synced, and queued counts plus a manual batch-sync action.
+* The production loop is: scan barcode → capture one clean product photo → keep moving → sync the batch while the sheet and AI finish the listing data.
 
 ---
 

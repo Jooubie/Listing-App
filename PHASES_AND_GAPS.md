@@ -20,30 +20,34 @@
 * Sync progress UI exists
 * Batch sync dashboard now surfaces queue, done, and online state
 
-## Phase 4 - Backend Write Path Partial
+## Phase 4 - Backend Write Path Done
 
-* Google Apps Script write proxy is wired in
-* Google Sheet setup instructions exist
+* Google Apps Script write proxy is wired in and deployed via clasp
+* Drive image hosting with rendering `=IMAGE` preview + direct `/view` link per row
+* Upload path retries the image at smaller sizes before falling back to a text-only row
 * Mock mode supports backend-free development
 
-## Phase 5 - Still Missing
+## Phase 5 - AI Classification Done
 
-* Real AI classification pipeline
-* Review and correction screen
+* Server-side classification pipeline (OpenRouter/Gemini) on a 1-min timed trigger
+* Fills section/category/sub-category/product/size/color/brand/descriptions/confidence
+* Flips status `pending` → `confirmed` / `needs_review` by a confidence threshold
+* Correction happens in the Google Sheet (no on-device review screen by design)
+
+## Phase 6 - Still Missing
+
 * End-to-end automated tests
 * Error reporting and telemetry
-* Final deployment checklist for Vercel and Apps Script releases
+* Formal release checklist for Vercel + Apps Script
 
 ## Key Gaps To Track
 
-* Docs still contain historical planning notes that mention earlier Supabase ideas
-* `GoogleSheetSetup.md` was cleaned and now matches the current sheet-driven flow
+* AI throughput is bounded by Apps Script quotas (~40 rows/min, 6-min execution cap)
+* Supabase has been fully removed; do not reintroduce it without a clear trigger (see status summary)
 
 ## Recommended Next Order
 
-1. Lock the docs to the actual live architecture
-2. Decide whether Supabase stays as future work or gets removed
-3. Add the AI/review phase only after the current capture loop is stable
-4. Add tests for sync and queue behavior
-5. Prepare production Vercel env settings and a release checklist
-6. Keep the docs aligned with the live Google Sheets workflow
+1. Add tests for sync and queue behavior
+2. Add lightweight error reporting/telemetry for field failures
+3. Prepare a production release checklist for Vercel env + Apps Script deploys
+4. Keep the docs aligned with the live Google Sheets workflow

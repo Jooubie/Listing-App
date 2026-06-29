@@ -17,7 +17,8 @@ Joub is a mobile-first PWA for warehouse photographers. The core loop is:
 * Scanning: `@zxing/browser`
 * Offline queue: IndexedDB via `idb`
 * Deployment: Vercel-friendly static build
-* Backend write path: Google Apps Script web app
+* Backend write path: Google Apps Script web app (Drive image hosting + Sheets row append)
+* AI classification: server-side in Apps Script via OpenRouter/Gemini on a 1-min timed trigger
 
 ## What Is Already Done
 
@@ -28,21 +29,22 @@ Joub is a mobile-first PWA for warehouse photographers. The core loop is:
 * Auto-sync on browser reconnect
 * PWA build and service worker generation
 * Mock mode for local development without live services
-* Compact dashboard for scanned, done, and queued counts
+* Compact dashboard for captured, synced, and queued counts
 * Manual batch sync action for operator confirmation
+* Drive image hosting with a rendering `=IMAGE` preview + direct `/view` link per row
+* Server-side AI classification (OpenRouter/Gemini) filling section/category/product/etc.
 
 ## What Is Missing Or Still Partial
 
-* Real AI classification backend is not implemented in the running app
-* Review/confirm screen is not implemented
+* No on-device review/confirm screen — intentional; the owner revises in the Sheet
 * Automated tests are not present
 * Production-quality PNG app icons are still recommended for best installability
-* A dedicated review screen is still not part of the runtime flow
 
 ## Risks
 
-* Docs are ahead of the code in a few places and should be kept aligned
-* Secret-like values should never live in tracked docs or local env files
+* AI throughput is bounded by Apps Script quotas (~40 rows/min trigger, 6-min execution cap)
+* Drive thumbnails can take a few seconds to generate after upload
+* Secret-like values must stay in Script Properties, never in tracked docs or env files
 * The app depends on camera permissions and HTTPS on mobile devices
 
 ## GitHub And Vercel Advice

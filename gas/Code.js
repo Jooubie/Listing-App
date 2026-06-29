@@ -70,7 +70,7 @@ const COL = {
 };
 
 const AI_PROVIDER                 = 'openrouter';
-const OPENROUTER_MODEL            = 'google/gemini-2.0-flash-001';
+const OPENROUTER_MODEL            = 'google/gemini-2.5-flash';
 const GEMINI_MODEL                = 'gemini-2.0-flash';
 const CLASSIFY_BATCH_LIMIT        = 40;
 const CONFIDENCE_REVIEW_THRESHOLD = 0.6;
@@ -80,10 +80,48 @@ const PLATFORM_COLORS = {
   amazon: '#2d1b00', noon: '#2d2900', al_nasser: '#1f0000', jumia: '#1f0d00'
 };
 
-function doGet() {
+function doGet(e) {
   const ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = ss.getSheetByName(CAPTURES_TAB);
   const rows  = sheet ? Math.max(0, sheet.getLastRow() - 1) : 0;
+
+  // ?action=diag → which provider/model is active and which keys exist (booleans only)
+  if (e && e.parameter && e.parameter.action === 'diag') {
+    const p = PropertiesService.getScriptProperties();
+    return json_({
+      success: true,
+      aiProvider: AI_PROVIDER,
+      openRouterModel: OPENROUTER_MODEL,
+      geminiModel: GEMINI_MODEL,
+      hasOpenRouterKey: !!p.getProperty('OPENROUTER_API_KEY'),
+      hasGeminiKey: !!p.getProperty('GEMINI_API_KEY')
+    });
+  }
+
+  // ?action=peek&n=3 → last N rows summary (ops/debug health check)
+  if (e && e.parameter && e.parameter.action === 'peek' && sheet && rows > 0) {
+    const n     = Math.min(parseInt(e.parameter.n, 10) || 3, 20);
+    const start = Math.max(2, sheet.getLastRow() - n + 1);
+    const count = sheet.getLastRow() - start + 1;
+    const vals  = sheet.getRange(start, 1, count, HEADERS.length).getValues();
+    const peek  = vals.map(function (r, i) {
+      return {
+        row:          start + i,
+        barcode:      r[COL.BARCODE - 1],
+        platform:     r[2],
+        photographer: r[3],
+        section:      r[COL.SECTION - 1],
+        category:     r[COL.CATEGORY - 1],
+        product:      r[COL.PRODUCT - 1],
+        confidence:   r[COL.CONFIDENCE - 1],
+        status:       r[COL.STATUS - 1],
+        notes:        r[COL.NOTES - 1],
+        imageUrl:     r[COL.ORIG_URL - 1]
+      };
+    });
+    return json_({ success: true, totalCaptures: rows, rows: peek });
+  }
+
   return json_({ success: true, status: 'ok', message: 'Joub v3 running', totalCaptures: rows, time: new Date().toISOString() });
 }
 
@@ -94,6 +132,7 @@ function doPost(e) {
     const sheet = getOrCreateCaptures_(ss);
 
     let imageUrl = data.imageUrl || '';
+    let previewUrl = '';
     if (data.imageBase64) {
       try {
         const bytes    = Utilities.base64Decode(data.imageBase64);
@@ -101,11 +140,14 @@ function doPost(e) {
         const blob     = Utilities.newBlob(bytes, 'image/jpeg', fileName);
         const file     = DriveApp.getFolderById(DRIVE_FOLDER_ID).createFile(blob);
         file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        imageUrl = 'https://drive.google.com/uc?id=' + file.getId();
+        const fileId = file.getId();
+        imageUrl   = driveViewUrl_(fileId);   // U: clickable link that actually opens
+        previewUrl = driveThumbUrl_(fileId);  // T: thumbnail endpoint renders in =IMAGE()
       } catch (imgErr) {
         console.error('[doPost] Drive image upload failed (row will still be written):', imgErr.message);
       }
     }
+    if (!previewUrl && imageUrl) previewUrl = driveThumbUrl_(driveIdFromUrl_(imageUrl));
 
     const barcode     = (data.barcode || '').toString().trim();
     const isDuplicate = checkDuplicate_(sheet, barcode);
@@ -124,7 +166,7 @@ function doPost(e) {
     var bc = colLetter_(COL.BARCODE);
     sheet.getRange(row, COL.DATE).setFormula('=TEXT(A' + row + ',"YYYY-MM-DD")');
     sheet.getRange(row, COL.DUP).setFormula('=IF(COUNTIF(' + bc + '$2:' + bc + row + ',' + bc + row + ')>1,"DUPLICATE","")');
-    if (imageUrl) sheet.getRange(row, COL.ORIG_PREVIEW).setFormula('=IMAGE("' + imageUrl + '")');
+    if (previewUrl) sheet.getRange(row, COL.ORIG_PREVIEW).setFormula('=IMAGE("' + previewUrl + '")');
 
     colorRowByPlatform_(sheet, row, data.platform || '');
     if (isDuplicate) sheet.getRange(row, COL.DUP).setBackground('#3d2800').setFontColor('#fbbf24');
@@ -229,6 +271,35 @@ function colLetter_(n) {
 
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── Drive image URL helpers ────────────────────────────────
+// uc?id= is deprecated by Google for both =IMAGE() and hotlinking. The thumbnail
+// endpoint renders reliably in-cell; /view is the clickable human/AI link.
+function driveThumbUrl_(fileId) { return 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1000'; }
+function driveViewUrl_(fileId)  { return 'https://drive.google.com/file/d/' + fileId + '/view'; }
+function driveIdFromUrl_(url)    { var m = String(url || '').match(/[-\w]{25,}/); return m ? m[0] : ''; }
+
+// One-time repair for rows captured before the URL fix. Rewrites column U to a
+// clean /view link and column T to a thumbnail =IMAGE() so old photos render.
+// Safe to re-run; skips rows with no parseable Drive id.
+function fixImageUrls() {
+  var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(CAPTURES_TAB);
+  if (!sheet || sheet.getLastRow() < 2) { Logger.log('fixImageUrls: no rows.'); return; }
+  var last = sheet.getLastRow();
+  var urls = sheet.getRange(2, COL.ORIG_URL, last - 1, 1).getValues();
+  var fixed = 0;
+  for (var i = 0; i < urls.length; i++) {
+    var id = driveIdFromUrl_(urls[i][0]);
+    if (!id) continue;
+    var row = i + 2;
+    try { DriveApp.getFileById(id).setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+    sheet.getRange(row, COL.ORIG_URL).setValue(driveViewUrl_(id));
+    sheet.getRange(row, COL.ORIG_PREVIEW).setFormula('=IMAGE("' + driveThumbUrl_(id) + '")');
+    fixed++;
+  }
+  Logger.log('fixImageUrls repaired ' + fixed + ' row(s).');
 }
 
 var TAXONOMY_TEXT = [

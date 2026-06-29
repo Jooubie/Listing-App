@@ -285,14 +285,17 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           </div>
         )}
 
-        {/* Manual entry CTA */}
+        {/* Scanning is automatic — manual entry is the fallback, so keep it secondary */}
+        <p className="text-[10px] text-slate-500 text-center font-medium">
+          Point at the barcode — it scans automatically
+        </p>
         <button
           id="manual-entry-btn"
           onClick={() => setIsManualOpen(true)}
-          className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white border-0 rounded-2xl font-bold flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-base shadow-lg shadow-indigo-500/20"
+          className="w-full py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 rounded-2xl font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer text-sm"
         >
-          <Keyboard className="w-5 h-5" />
-          Enter Barcode
+          <Keyboard className="w-4 h-4 text-indigo-400" />
+          Type barcode manually
         </button>
       </div>
 

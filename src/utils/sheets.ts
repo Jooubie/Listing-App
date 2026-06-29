@@ -1,6 +1,8 @@
 // Google Sheets integration via Google Apps Script Web App proxy.
 // The Apps Script handles authentication, Drive image upload, and sheet row append.
 
+import { resizeImage } from './image';
+
 const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
 
 export const isMockMode =
@@ -31,29 +33,34 @@ export interface SheetWriteResponse {
   success: boolean;
   imageUrl?: string;
   rowNumber?: number;
+  duplicate?: boolean;
+  error?: string;
 }
+
+// Compression ladder, tried in order before we ever drop the image. Each step is
+// re-encoded from the ORIGINAL blob, so even an oversized native-camera photo
+// (where the client-side pre-resize was skipped or failed) still gets shrunk to
+// a payload Apps Script reliably accepts. This is what guarantees a hosted image.
+const IMAGE_LADDER: ReadonlyArray<readonly [maxEdge: number, quality: number]> = [
+  [1280, 0.72],
+  [1024, 0.6],
+  [800, 0.5],
+];
 
 export async function writeRowToSheet(row: CaptureRow): Promise<SheetWriteResponse> {
   const timestamp = new Date().toISOString();
 
   if (isMockMode) {
-    console.log('[Mock] Writing to Google Sheet:', { ...row, imageBlob: '[Blob]' });
-    await new Promise(r => setTimeout(r, 900));
-    return { success: true, imageUrl: 'https://lh3.googleusercontent.com/d/mock_image_id', rowNumber: 1 };
+    console.log('[Mock] Writing to Google Sheet:', { ...row, imageBlob: row.imageBlob ? '[Blob]' : undefined });
+    await new Promise((r) => setTimeout(r, 700));
+    return {
+      success: true,
+      imageUrl: row.imageBlob ? 'https://drive.google.com/file/d/mock_image_id/view' : '',
+      rowNumber: 1,
+    };
   }
 
-  // Convert image blob to base64
-  let imageBase64: string | undefined;
-  if (row.imageBlob) {
-    try {
-      imageBase64 = await blobToBase64(row.imageBlob);
-      console.log(`[Sheets] Image base64 ready, size: ~${Math.round(imageBase64.length / 1024)}KB`);
-    } catch (err) {
-      console.warn('[Sheets] Image base64 conversion failed — submitting row without image:', err);
-    }
-  }
-
-  const payload = {
+  const base = {
     timestamp,
     platform: row.platform,
     barcode: row.barcode,
@@ -71,38 +78,44 @@ export async function writeRowToSheet(row: CaptureRow): Promise<SheetWriteRespon
     confidence: row.confidence,
     notes: row.notes,
     status: row.status ?? 'pending',
-    imageBase64
   };
 
-  try {
-    const response = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-      redirect: 'follow',
-    });
-
-    if (!response.ok) {
-      throw new Error(`Apps Script returned HTTP ${response.status}`);
+  // With an image: try progressively smaller encodings; only fall back to a
+  // text-only row if every attempt fails, so a scan is never silently lost.
+  if (row.imageBlob) {
+    let lastErr: unknown;
+    for (const [maxEdge, quality] of IMAGE_LADDER) {
+      try {
+        const blob = await resizeImage(row.imageBlob, maxEdge, quality);
+        const imageBase64 = await blobToBase64(blob);
+        console.log(`[Sheets] Uploading image @${maxEdge}px (~${Math.round(imageBase64.length / 1024)}KB base64)`);
+        return await postToScript({ ...base, imageBase64 });
+      } catch (err) {
+        lastErr = err;
+        console.warn(`[Sheets] Image write @${maxEdge}px failed; trying smaller…`, err);
+      }
     }
-
-    const result: SheetWriteResponse = await response.json();
-    if (!result.success) {
-      throw new Error(result.imageUrl || 'Apps Script reported write failure');
-    }
-
-    return result;
-  } catch (err) {
-    // FALLBACK: If the upload fails with the image (e.g. timeout, payload too large, Drive full),
-    // strip the image blob and submit just the text data so the scan isn't lost.
-    if (row.imageBlob) {
-      console.warn('[Sheets] Upload with image failed. Retrying text-only write...', err);
-      const fallbackRow = { ...row };
-      delete fallbackRow.imageBlob;
-      return writeRowToSheet(fallbackRow);
-    }
-    throw err;
+    console.warn('[Sheets] All image attempts failed — saving row without image.', lastErr);
   }
+
+  return postToScript(base);
+}
+
+// Single POST to the Apps Script web app. text/plain dodges the CORS preflight;
+// redirect:follow handles the script.google.com → googleusercontent.com hop.
+async function postToScript(payload: Record<string, unknown>): Promise<SheetWriteResponse> {
+  const response = await fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload),
+    redirect: 'follow',
+  });
+
+  if (!response.ok) throw new Error(`Apps Script HTTP ${response.status}`);
+
+  const result: SheetWriteResponse = await response.json();
+  if (!result.success) throw new Error(result.error || 'Apps Script reported write failure');
+  return result;
 }
 
 function blobToBase64(blob: Blob): Promise<string> {

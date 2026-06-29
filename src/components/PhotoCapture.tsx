@@ -214,7 +214,7 @@ export const PhotoCapture: React.FC<PhotoCaptureProps> = ({
                 className="w-14 h-14 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors"
               >
                 <Upload className="w-5 h-5 text-indigo-400" />
-                <span className="text-[9px] text-slate-400 font-bold">Files</span>
+                <span className="text-[9px] text-slate-400 font-bold">Gallery</span>
               </button>
 
               {/* Shutter */}

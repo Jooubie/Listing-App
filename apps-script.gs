@@ -76,7 +76,7 @@ const COL = {
 //   OPENROUTER_API_KEY  → when AI_PROVIDER = 'openrouter'
 //   GEMINI_API_KEY      → when AI_PROVIDER = 'gemini'
 const AI_PROVIDER                 = 'openrouter';            // 'openrouter' | 'gemini'
-const OPENROUTER_MODEL            = 'google/gemini-2.0-flash-001';
+const OPENROUTER_MODEL            = 'google/gemini-2.5-flash';
 const GEMINI_MODEL                = 'gemini-2.0-flash';
 const CLASSIFY_BATCH_LIMIT        = 40;   // rows per run; ~3s each → ~2min, well under the 6-min cap
 const CONFIDENCE_REVIEW_THRESHOLD = 0.6;  // below this → needs_review
@@ -93,10 +93,46 @@ const PLATFORM_COLORS = {
 // ───────────────────────────────────────────────────────────
 //  GET — health check
 // ───────────────────────────────────────────────────────────
-function doGet() {
+function doGet(e) {
   const ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = ss.getSheetByName(CAPTURES_TAB);
   const rows  = sheet ? Math.max(0, sheet.getLastRow() - 1) : 0;
+
+  // ?action=diag → which provider/model is active and which keys exist (booleans only).
+  if (e && e.parameter && e.parameter.action === 'diag') {
+    const p = PropertiesService.getScriptProperties();
+    return json_({
+      success: true,
+      aiProvider: AI_PROVIDER,
+      openRouterModel: OPENROUTER_MODEL,
+      geminiModel: GEMINI_MODEL,
+      hasOpenRouterKey: !!p.getProperty('OPENROUTER_API_KEY'),
+      hasGeminiKey: !!p.getProperty('GEMINI_API_KEY')
+    });
+  }
+
+  // ?action=peek&n=3 → last N rows summary (ops/debug health check, no PII).
+  if (e && e.parameter && e.parameter.action === 'peek' && sheet && rows > 0) {
+    const n     = Math.min(parseInt(e.parameter.n, 10) || 3, 20);
+    const start = Math.max(2, sheet.getLastRow() - n + 1);
+    const count = sheet.getLastRow() - start + 1;
+    const vals  = sheet.getRange(start, 1, count, HEADERS.length).getValues();
+    const peek  = vals.map((r, i) => ({
+      row:          start + i,
+      barcode:      r[COL.BARCODE - 1],
+      platform:     r[2],
+      photographer: r[3],
+      section:      r[COL.SECTION - 1],
+      category:     r[COL.CATEGORY - 1],
+      product:      r[COL.PRODUCT - 1],
+      confidence:   r[COL.CONFIDENCE - 1],
+      status:       r[COL.STATUS - 1],
+      notes:        r[COL.NOTES - 1],
+      imageUrl:     r[COL.ORIG_URL - 1]
+    }));
+    return json_({ success: true, totalCaptures: rows, rows: peek });
+  }
+
   return json_({
     success: true,
     status: 'ok',
@@ -115,8 +151,11 @@ function doPost(e) {
     const ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = getOrCreateCaptures_(ss);
 
-    // 1. Upload image to Drive (if base64 payload present) — non-fatal
+    // 1. Upload image to Drive (if base64 payload present) — non-fatal.
+    // imageUrl (col U) is a clickable /view link; previewUrl (col T) is the
+    // thumbnail endpoint, which is the only Drive URL that still renders in =IMAGE().
     let imageUrl = data.imageUrl || '';
+    let previewUrl = '';
     if (data.imageBase64) {
       try {
         const bytes    = Utilities.base64Decode(data.imageBase64);
@@ -124,11 +163,14 @@ function doPost(e) {
         const blob     = Utilities.newBlob(bytes, 'image/jpeg', fileName);
         const file     = DriveApp.getFolderById(DRIVE_FOLDER_ID).createFile(blob);
         file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        imageUrl = `https://drive.google.com/uc?id=${file.getId()}`;
+        const fileId = file.getId();
+        imageUrl   = driveViewUrl_(fileId);
+        previewUrl = driveThumbUrl_(fileId);
       } catch (imgErr) {
         console.error('[doPost] Drive image upload failed (row will still be written):', imgErr.message);
       }
     }
+    if (!previewUrl && imageUrl) previewUrl = driveThumbUrl_(driveIdFromUrl_(imageUrl));
 
     // 2. Duplicate check against existing barcodes
     const barcode     = (data.barcode || '').toString().trim();
@@ -171,8 +213,8 @@ function doPost(e) {
     sheet.getRange(row, COL.DUP).setFormula(
       `=IF(COUNTIF(${bc}$2:${bc}${row},${bc}${row})>1,"⚠️ DUPLICATE","")`
     );
-    if (imageUrl) {
-      sheet.getRange(row, COL.ORIG_PREVIEW).setFormula(`=IMAGE("${imageUrl}")`);
+    if (previewUrl) {
+      sheet.getRange(row, COL.ORIG_PREVIEW).setFormula(`=IMAGE("${previewUrl}")`);
     }
 
     // 5. Visual cues
@@ -315,6 +357,35 @@ function colLetter_(n) {
 
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── Drive image URL helpers ────────────────────────────────
+// uc?id= is deprecated by Google for both =IMAGE() and hotlinking. The thumbnail
+// endpoint renders reliably in-cell; /view is the clickable human/AI link.
+function driveThumbUrl_(fileId) { return `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`; }
+function driveViewUrl_(fileId)  { return `https://drive.google.com/file/d/${fileId}/view`; }
+function driveIdFromUrl_(url)    { const m = String(url || '').match(/[-\w]{25,}/); return m ? m[0] : ''; }
+
+// One-time repair for rows captured before the URL fix. Rewrites column U to a
+// clean /view link and column T to a thumbnail =IMAGE() so old photos render.
+// Safe to re-run; skips rows with no parseable Drive id.
+function fixImageUrls() {
+  const ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(CAPTURES_TAB);
+  if (!sheet || sheet.getLastRow() < 2) { Logger.log('fixImageUrls: no rows.'); return; }
+  const last = sheet.getLastRow();
+  const urls = sheet.getRange(2, COL.ORIG_URL, last - 1, 1).getValues();
+  let fixed = 0;
+  for (let i = 0; i < urls.length; i++) {
+    const id = driveIdFromUrl_(urls[i][0]);
+    if (!id) continue;
+    const row = i + 2;
+    try { DriveApp.getFileById(id).setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+    sheet.getRange(row, COL.ORIG_URL).setValue(driveViewUrl_(id));
+    sheet.getRange(row, COL.ORIG_PREVIEW).setFormula(`=IMAGE("${driveThumbUrl_(id)}")`);
+    fixed++;
+  }
+  Logger.log('fixImageUrls repaired ' + fixed + ' row(s).');
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -48,7 +48,7 @@ export function SessionDashboard({
               }`}
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              {isSyncing ? 'Syncing' : queuedCount > 0 ? 'Confirm batch' : 'Ready'}
+              {isSyncing ? 'Syncing…' : queuedCount > 0 ? 'Sync now' : 'Synced'}
             </button>
           )}
         </div>
