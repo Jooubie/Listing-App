@@ -114,7 +114,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         if (isStoppedRef.current) return;
         if (result) {
           const text = result.getText();
-          if (!text || text.trim().length < 4 || !/^[A-Za-z0-9\-]+$/.test(text)) return;
+          if (!text || text.trim().length < 4 || !/^[A-Za-z0-9-]+$/.test(text)) return;
           triggerSuccessFeedback();
           setDecodedValue(text);
           isStoppedRef.current = true;

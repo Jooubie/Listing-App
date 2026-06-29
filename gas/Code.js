@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /**
  * Listing App "Joub" — Google Apps Script Write Proxy  v3
  * ─────────────────────────────────────────────────────────

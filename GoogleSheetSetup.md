@@ -14,8 +14,7 @@ tabs, all 24 columns, dropdowns, formatting, and the AI trigger.
 
 | File | Role |
 | --- | --- |
-| `gas/Code.js` | The script that is actually deployed (pushed via clasp). |
-| `apps-script.gs` | Readable mirror of the same code (keep both in sync). |
+| `gas/Code.js` | The script that is actually deployed (pushed via clasp) and the single source of truth. |
 
 The script reads its keys from **Script Properties**, never from the code or the
 app bundle. No secrets live in this repo.
@@ -65,7 +64,7 @@ no longer renders — do not reintroduce it.
 
 ## 3. Configure the script
 
-In `gas/Code.js` / `apps-script.gs`, set the two IDs at the top:
+In `gas/Code.js`, set the two IDs at the top:
 
 ```javascript
 const SPREADSHEET_ID  = '...';   // from the sheet URL
@@ -96,7 +95,7 @@ Deploying **to the existing deployment id** keeps the same `/exec` URL, so the
 frontend `VITE_APPS_SCRIPT_URL` stays valid. A bare `clasp deploy` creates a new
 URL and breaks the app.
 
-Manual alternative: **Extensions → Apps Script**, paste `apps-script.gs`,
+Manual alternative: **Extensions → Apps Script**, paste `gas/Code.js`,
 **Deploy → Manage deployments → Edit → New version**.
 
 After deploying the first time, run `setup()` once from the editor to build the
