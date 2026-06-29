@@ -363,7 +363,7 @@ function classifyPending() {
   for (var i = 0; i < values.length; i++) {
     if (processed >= CLASSIFY_BATCH_LIMIT) break;
     var row = i + 2;
-    if (values[i][COL.STATUS - 1] !== 'pending' || !values[i][COL.ORIG_URL - 1]) continue;
+    if (!shouldClassifyRow_(values[i])) continue;
     try {
       var s = classifyImage_(values[i][COL.ORIG_URL - 1], apiKey);
       sheet.getRange(row, COL.SECTION, 1, 5).setValues([[s.section || '', s.category || '', s.sub_category || '', s.product || '', s.size || '']]);
@@ -381,6 +381,23 @@ function classifyPending() {
   Logger.log('classifyPending processed ' + processed + ' row(s).');
 }
 
+function shouldClassifyRow_(row) {
+  var status = row[COL.STATUS - 1];
+  var imageUrl = row[COL.ORIG_URL - 1];
+  if (!imageUrl) return false;
+  if (status === 'pending') return true;
+
+  // Retry rows that failed because the AI provider/key was temporarily broken,
+  // but do not reprocess genuine low-confidence human-review rows.
+  var hasClassification = row[COL.SECTION - 1] || row[COL.CATEGORY - 1] || row[COL.PRODUCT - 1];
+  var notes = String(row[COL.NOTES - 1] || '');
+  if (status === 'needs_review' && !hasClassification && notes.indexOf('AI failed:') === 0) return true;
+
+  var product = String(row[COL.PRODUCT - 1] || '');
+  return product === 'Other / Unclassified' &&
+    (notes.indexOf('provided taxonomy') !== -1 || notes.indexOf('does not fit') !== -1);
+}
+
 function classifyImage_(imageUrl, apiKey) {
   var idMatch = String(imageUrl).match(/[-\w]{25,}/);
   if (!idMatch) throw new Error('Could not parse Drive file id');
@@ -391,7 +408,7 @@ function classifyImage_(imageUrl, apiKey) {
 }
 
 function buildPrompt_() {
-  return 'You are a professional product cataloging assistant for an e-commerce platform.\nAnalyze the product image and classify it strictly using the taxonomy below, and write marketing-grade product descriptions in Arabic and English.\n\nTaxonomy (pick exact matches for section, category, sub_category, product):\n' + TAXONOMY_TEXT + '\n\nReturn ONLY valid JSON:\n{"section":"","category":"","sub_category":"","product":"","size":"","color":"","description_ar":"","description_en":"","brand":"","confidence":0.0,"notes":""}\nRules: section/category/sub_category/product MUST be exact taxonomy values. color uses short codes (Wht, Blk, Wht-Gry, Blu, Red...). size only if visible else blank. brand if visible else "Unknown". confidence 0.0-1.0. Return ONLY the JSON object.';
+  return 'You are a professional product cataloging assistant for a mall inventory database.\nAnalyze the product image, identify the exact retail product type, and write marketing-grade product descriptions in Arabic and English.\n\nPreferred taxonomy (use exact matches when the product clearly fits):\n' + TAXONOMY_TEXT + '\n\nIf the product does NOT fit the preferred taxonomy, do NOT force it to Other. Create concise retail labels for section, category, sub_category, and product instead, such as Home & Kitchen / Drinkware / Water Bottles / Water Bottle. Use Other / Unclassified only when the image is too unclear to identify.\n\nReturn ONLY valid JSON:\n{"section":"","category":"","sub_category":"","product":"","size":"","color":"","description_ar":"","description_en":"","brand":"","confidence":0.0,"notes":""}\nRules: color uses short codes (Wht, Blk, Wht-Gry, Blu, Red...). size only if visible else blank. brand if visible else "Unknown". confidence 0.0-1.0. Return ONLY the JSON object.';
 }
 
 function classifyViaOpenRouter_(blob, base64, prompt, apiKey) {
