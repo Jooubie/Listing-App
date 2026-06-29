@@ -130,16 +130,8 @@ export default function App() {
           photographer_id: photographerId,
         });
       } catch (queueErr) {
-        console.warn('[App] Queueing with image failed, retrying without image:', queueErr);
+        console.warn('[App] Queueing with image failed, writing directly to sheet:', queueErr);
         try {
-          await enqueueCapture({
-            platform,
-            barcode: activeBarcode,
-            imageBlob: null,
-            photographer_id: photographerId,
-          });
-        } catch (queueFallbackErr) {
-          console.warn('[App] Queueing without image failed, writing directly to sheet:', queueFallbackErr);
           await writeRowToSheet({
             platform,
             barcode: activeBarcode,
@@ -158,6 +150,14 @@ export default function App() {
             notes: '',
             imageBlob: imageBlob ?? undefined,
             status: 'pending',
+          });
+        } catch (writeErr) {
+          console.warn('[App] Direct write failed after queue failure, retrying text-only queue:', writeErr);
+          await enqueueCapture({
+            platform,
+            barcode: activeBarcode,
+            imageBlob: null,
+            photographer_id: photographerId,
           });
         }
       }
