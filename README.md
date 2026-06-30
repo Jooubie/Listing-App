@@ -1,5 +1,8 @@
 # Listing App "Joub" — Photographer PWA
 
+<!-- deployment: verifying Vercel auto-deploy on push to main -->
+
+
 This is the mobile-first Progressive Web App (PWA) designed for warehouse photographers to quickly scan retail product barcodes and take product photographs.
 
 The application acts as a high-speed capture buffer that stores scans locally when needed, then writes rows through a Google Apps Script proxy into Google Sheets. It is optimized for fast field capture, offline retries, and a minimal mobile workflow.
